@@ -1,0 +1,17 @@
+# 运行时数据（不打包进镜像）
+output/
+data/
+checkpoints/
+.env
+
+# 开发文件
+__pycache__/
+*.pyc
+.git/
+.github/
+tests/
+*.md
+!docs/*.md
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

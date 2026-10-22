@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>网文 AI 创作引擎</title>
+<style>
+:root {
+  --bg:#0f0f13; --surface:#1a1a24; --surface2:#22222f; --border:#2e2e42;
+  --accent:#7c6fff; --accent2:#ff6b6b; --gold:#ffd060; --green:#4ade80;
+  --text:#e8e8f0; --text2:#9090aa; --text3:#5a5a78; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'PingFang SC','Microsoft YaHei',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+#topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;height:52px;display:flex;align-items:center;gap:12px;flex-shrink:0;}
+#topbar h1{font-size:16px;font-weight:700;background:linear-gradient(135deg,#7c6fff,#ff6b6b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;white-space:nowrap;}
+#progress-wrap{flex:1;display:flex;align-items:center;gap:10px;}
+#progress-bar-bg{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
+#progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width 0.4s ease;}
+#status-text{font-size:12px;color:var(--text2);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;}
+#btn-cancel{background:#3a1a1a;color:var(--accent2);border:1px solid #5a2a2a;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;display:none;}
+#btn-cancel:hover{background:#4a2020;}
+#main{display:flex;flex:1;overflow:hidden;}
+#sidebar{width:340px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;}
+.tab-bar{display:flex;border-bottom:1px solid var(--border);}
+.tab-btn{flex:1;padding:12px;font-size:13px;text-align:center;cursor:pointer;color:var(--text2);border:none;background:none;transition:all 0.2s;}
+.tab-btn.active{color:var(--accent);border-bottom:2px solid var(--accent);}
+.tab-content{flex:1;overflow-y:auto;padding:16px;}
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+.form-section{margin-bottom:20px;}
+.form-section h3{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;}
+.form-label{font-size:12px;color:var(--text2);margin-bottom:6px;display:block;}
+.form-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;color:var(--text);outline:none;transition:border-color 0.2s;resize:none;}
+.form-input:focus{border-color:var(--accent);}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.type-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;cursor:pointer;transition:all 0.18s;}
+.type-card:hover{border-color:var(--accent);}
+.type-card.selected{border-color:var(--accent);background:rgba(124,111,255,0.12);}
+.type-card .icon{font-size:18px;margin-bottom:4px;}
+.type-card .name{font-size:12px;font-weight:600;}
+.type-card .desc{font-size:10px;color:var(--text2);margin-top:2px;line-height:1.3;}
+.pleasure-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;cursor:pointer;transition:all 0.18s;}
+.pleasure-card:hover{border-color:var(--gold);}
+.pleasure-card.selected{border-color:var(--gold);background:rgba(255,208,96,0.08);}
+.pleasure-card .p-icon{font-size:16px;margin-bottom:3px;}
+.pleasure-card .p-name{font-size:12px;font-weight:600;}
+.pleasure-card .p-desc{font-size:10px;color:var(--text2);margin-top:2px;line-height:1.3;}
+.slider-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.slider-row label{font-size:12px;color:var(--text2);width:80px;flex-shrink:0;}
+.slider-row input[type=range]{flex:1;accent-color:var(--accent);}
+.slider-row span{font-size:12px;color:var(--accent);width:36px;text-align:right;flex-shrink:0;}
+.mode-row{display:flex;gap:8px;}
+.mode-btn{flex:1;padding:8px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-size:12px;cursor:pointer;text-align:center;transition:all 0.18s;}
+.mode-btn.active{border-color:var(--accent);background:rgba(124,111,255,0.15);color:var(--accent);}
+.mode-btn .mode-name{font-weight:600;}
+.mode-btn .mode-desc{font-size:10px;margin-top:2px;}
+#btn-generate{width:100%;padding:13px;background:linear-gradient(135deg,var(--accent),#a78bfa);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;transition:opacity 0.2s;}
+#btn-generate:hover{opacity:0.9;}
+#btn-generate:disabled{opacity:0.4;cursor:not-allowed;}
+.history-item{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;}
+.history-title{font-size:13px;font-weight:600;margin-bottom:4px;}
+.history-meta{font-size:11px;color:var(--text2);margin-bottom:8px;}
+.history-actions{display:flex;gap:6px;}
+.history-actions a,.history-actions button{font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text2);cursor:pointer;text-decoration:none;}
+.history-actions .dl-btn{border-color:var(--accent);color:var(--accent);}
+#content{flex:1;overflow-y:auto;padding:20px;}
+#welcome{text-align:center;padding:80px 40px;color:var(--text3);}
+#welcome h2{font-size:22px;color:var(--text2);margin-bottom:10px;}
+#welcome p{font-size:14px;line-height:1.8;}
+.section-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px;animation:fadeIn 0.3s ease;}
+.section-card h2{font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.section-card h2 .badge{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;}
+.badge-world{background:rgba(96,165,250,0.2);color:#60a5fa;}
+.badge-chars{background:rgba(167,139,250,0.2);color:#a78bfa;}
+.badge-plot{background:rgba(251,191,36,0.2);color:#fbbf24;}
+.badge-outline{background:rgba(52,211,153,0.2);color:#34d399;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+.power-levels{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;}
+.power-level{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;}
+.power-level .lv-name{font-weight:700;color:var(--accent);}
+.power-level .lv-power{color:var(--text2);margin-top:2px;}
+.power-arrow{color:var(--text3);font-size:12px;}
+.faction-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;}
+.faction-card{background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:10px;font-size:11px;}
+.faction-card.enemy{border-color:rgba(239,68,68,0.3);}
+.faction-card.ally{border-color:rgba(74,222,128,0.3);}
+.f-type{font-size:9px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
+.f-name{font-weight:700;font-size:12px;margin-bottom:3px;}
+.f-desc{color:var(--text2);line-height:1.4;}
+.char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;}
+.char-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;}
+.char-card.protagonist{border-color:rgba(251,191,36,0.4);}
+.char-role{font-size:9px;text-transform:uppercase;color:var(--text3);margin-bottom:6px;}
+.char-name{font-size:14px;font-weight:700;margin-bottom:4px;}
+.char-power{font-size:10px;color:var(--accent);background:rgba(124,111,255,0.1);display:inline-block;padding:1px 7px;border-radius:10px;margin-bottom:6px;}
+.char-detail{color:var(--text2);line-height:1.5;}
+.char-speech{font-size:10px;color:var(--text3);margin-top:6px;border-top:1px solid var(--border);padding-top:5px;font-style:italic;}
+.antag-list{display:flex;flex-direction:column;gap:7px;}
+.antag-item{background:var(--surface2);border:1px solid rgba(239,68,68,0.2);border-radius:7px;padding:10px;font-size:11px;display:flex;gap:10px;align-items:flex-start;}
+.antag-tier{background:var(--accent2);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;}
+.antag-name{font-weight:700;margin-bottom:3px;}
+.antag-detail{color:var(--text2);}
+.milestone-list{display:flex;flex-direction:column;gap:8px;}
+.milestone-item{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:11px;}
+.milestone-num{background:var(--accent);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;}
+.milestone-title{font-weight:600;margin-bottom:2px;}
+.milestone-desc{color:var(--text2);}
+.volume-overview{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
+.vol-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;cursor:pointer;transition:border-color 0.2s;}
+.vol-card:hover{border-color:var(--accent);}
+.vol-num{font-size:10px;color:var(--text3);margin-bottom:4px;}
+.vol-title{font-size:13px;font-weight:700;margin-bottom:4px;}
+.vol-theme{color:var(--text2);line-height:1.4;margin-bottom:8px;}
+.vol-power{font-size:10px;color:var(--accent);}
+.vol-pleasure{font-size:10px;background:rgba(255,208,96,0.1);color:var(--gold);padding:3px 8px;border-radius:4px;margin-top:6px;line-height:1.4;}
+.chapter-outline-list{display:flex;flex-direction:column;gap:6px;}
+.co-item{background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:10px 12px;font-size:11px;}
+.co-item.has-pleasure{border-left:3px solid var(--gold);}
+.co-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.co-num{color:var(--text3);font-size:10px;}
+.co-title{font-weight:600;flex:1;}
+.co-pleasure-badge{background:rgba(255,208,96,0.15);color:var(--gold);font-size:9px;padding:1px 6px;border-radius:4px;}
+.co-events{color:var(--text2);line-height:1.6;}
+.co-hook{color:var(--accent2);font-size:10px;margin-top:4px;font-style:italic;}
+.chapter-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;}
+.chapter-header{padding:12px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;border-bottom:1px solid var(--border);}
+.chapter-header:hover{background:rgba(255,255,255,0.02);}
+.ch-vol-badge{font-size:10px;background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:5px;color:var(--text2);}
+.ch-num{font-size:11px;color:var(--text3);}
+.ch-title{font-weight:700;font-size:14px;flex:1;}
+.ch-badges{display:flex;gap:6px;}
+.ch-badge{font-size:10px;padding:2px 7px;border-radius:10px;}
+.pleasure-badge{background:rgba(255,208,96,0.15);color:var(--gold);}
+.hook-badge{background:rgba(74,222,128,0.15);color:var(--green);}
+.issue-badge{background:rgba(239,68,68,0.15);color:#ef4444;}
+.ch-toggle{color:var(--text3);font-size:12px;margin-left:4px;}
+.chapter-body{padding:0 16px;max-height:0;overflow:hidden;transition:max-height 0.3s ease,padding 0.3s;}
+.chapter-body.expanded{max-height:9999px;padding:14px 16px;}
+.chapter-content{font-size:14px;line-height:2;color:var(--text);white-space:pre-wrap;}
+.typing-cursor{display:inline-block;width:2px;height:1em;background:var(--accent);animation:blink 0.8s infinite;vertical-align:text-bottom;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0;}}
+.chapter-notes{margin-top:12px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);padding-top:8px;}
+.chapter-notes .note-item{padding:3px 0;}
+.chapter-notes .note-item::before{content:"⚠ ";color:var(--accent2);}
+#complete-banner{background:linear-gradient(135deg,rgba(74,222,128,0.1),rgba(124,111,255,0.1));border:1px solid rgba(74,222,128,0.3);border-radius:var(--radius);padding:20px;text-align:center;margin-bottom:16px;animation:fadeIn 0.4s ease;}
+#complete-banner h2{font-size:18px;color:var(--green);margin-bottom:8px;}
+#complete-banner p{color:var(--text2);font-size:13px;margin-bottom:14px;}
+#btn-download{background:linear-gradient(135deg,var(--green),#22d3ee);color:#000;font-weight:700;border:none;padding:10px 28px;border-radius:7px;font-size:14px;cursor:pointer;text-decoration:none;display:inline-block;}
+.divider{height:1px;background:var(--border);margin:16px 0;}
+.section-title{font-size:13px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+.section-title .st-num{background:var(--accent);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;}
+.collapsible{border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;}
+.collapsible-header{padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:12px;background:var(--surface2);}
+.collapsible-header:hover{background:rgba(255,255,255,0.03);}
+.collapsible-body{display:none;padding:12px 14px;}
+.collapsible-body.open{display:block;}
+.loading-dots{display:inline-flex;gap:4px;}
+.loading-dots span{width:4px;height:4px;background:var(--accent);border-radius:50%;animation:bounce 1.2s infinite;}
+.loading-dots span:nth-child(2){animation-delay:0.2s;}
+.loading-dots span:nth-child(3){animation-delay:0.4s;}
+@keyframes bounce{0%,80%,100%{transform:scale(0.8);opacity:0.5;}40%{transform:scale(1.2);opacity:1;}}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text3);font-size:13px;}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>⚡ 网文 AI 引擎</h1>
+  <div id="progress-wrap">
+    <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+    <span id="status-text">准备就绪</span>
+  </div>
+  <button id="btn-cancel">■ 取消</button>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('create')">创 作</button>
+      <button class="tab-btn" onclick="switchTab('history')">历 史</button>
+    </div>
+    <div class="tab-content">
+
+      <!-- 创作 -->
+      <div id="panel-create" class="tab-panel active">
+        <div class="form-section">
+          <h3>📚 小说类型</h3>
+          <div class="card-grid" id="genre-grid"></div>
+        </div>
+        <div class="form-section">
+          <h3>⚡ 核心爽点</h3>
+          <div class="card-grid" id="pleasure-grid"></div>
+        </div>
+        <div class="form-section">
+          <h3>🧑 主角设定</h3>
+          <label class="form-label">主角姓名</label>
+          <input id="inp-name" class="form-input" placeholder="如：陈北玄、林逸、李飞" style="margin-bottom:10px">
+          <label class="form-label">起点设定</label>
+          <textarea id="inp-background" class="form-input" rows="2" placeholder="如：灵根被废、被家族驱逐的天才少年，身负血海深仇" style="margin-bottom:10px"></textarea>
+          <label class="form-label">金手指 / 外挂</label>
+          <textarea id="inp-golden" class="form-input" rows="2" placeholder="如：觉醒万道归一体，可融合任意功法"></textarea>
+        </div>
+        <div class="form-section">
+          <div class="collapsible">
+            <div class="collapsible-header" onclick="toggleCollapse(this)">
+              <span>⚙ 扩展设定（可选）</span><span>▸</span>
+            </div>
+            <div class="collapsible-body">
+              <label class="form-label">世界观描述（留空则AI生成）</label>
+              <textarea id="inp-world" class="form-input" rows="2" placeholder="如：修真大陆，灵气复苏，宗门林立" style="margin-bottom:10px"></textarea>
+              <label class="form-label">反派方向（留空则AI生成）</label>
+              <input id="inp-antag" class="form-input" placeholder="如：家族仇人→宗门势力→魔道霸主" style="margin-bottom:10px">
+              <label class="form-label">感情线设定（留空则AI生成）</label>
+              <input id="inp-romance" class="form-input" placeholder="如：青梅竹马的师妹，先误会后真爱">
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <h3>📐 结构设定</h3>
+          <div class="slider-row">
+            <label>卷数</label>
+            <input type="range" id="sl-volumes" min="1" max="100" value="10" oninput="updateSlider('sl-volumes','val-volumes');updateTotalChapters()">
+            <span id="val-volumes">10</span>
+          </div>
+          <div class="slider-row">
+            <label>每卷章数</label>
+            <input type="range" id="sl-chapters" min="5" max="30" value="10" oninput="updateSlider('sl-chapters','val-chapters');updateTotalChapters()">
+            <span id="val-chapters">10</span>
+          </div>
+          <div class="slider-row" style="background:rgba(168,85,247,0.08);padding:4px 8px;border-radius:6px;">
+            <label style="color:var(--accent)">总章数</label>
+            <span id="val-total-chapters" style="color:var(--accent);font-weight:600;">100</span>
+          </div>
+          <div class="slider-row">
+            <label>每章字数</label>
+            <input type="range" id="sl-words" min="1000" max="5000" step="500" value="2000" oninput="updateSlider('sl-words','val-words')">
+            <span id="val-words">2000</span>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);margin-top:8px;">
+            <input type="checkbox" id="chk-infinite" style="accent-color:var(--accent);cursor:pointer;" onchange="toggleInfiniteMode()">
+            <span>♾ 无限模式（持续生成直到手动停止）</span>
+          </label>
+        </div>
+        <div class="form-section">
+          <h3>🎯 质量模式</h3>
+          <div class="mode-row">
+            <div class="mode-btn active" onclick="selectMode('standard',this)">
+              <div class="mode-name">标准</div>
+              <div class="mode-desc">平衡速度与质量</div>
+            </div>
+            <div class="mode-btn" onclick="selectMode('deep',this)">
+              <div class="mode-name">深度</div>
+              <div class="mode-desc">一致性校验+钩子评分</div>
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);">
+            <input type="checkbox" id="chk-interactive" style="accent-color:var(--accent);cursor:pointer;">
+            <span>🤝 交互模式（每步审批）</span>
+          </label>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;">生成过程中可审查、修改AI输出</div>
+        </div>
+        <button id="btn-generate" onclick="startGenerate()">⚡ 开始创作</button>
+      </div>
+
+      <!-- 历史 -->
+      <div id="panel-history" class="tab-panel">
+        <div id="history-list"><div class="empty-state">暂无历史记录</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="content">
+    <div id="welcome">
+      <h2>⚡ 网文 AI 创作引擎</h2>
+      <p>选择类型 → 定义爽点 → 设定主角<br>AI 自动构建世界 · 规划反派梯队 · 设计钩子 · 逐章流式写作</p>
+    </div>
+    <div id="gen-area" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const GENRES = [
+  {id:'xuanhuan',name:'玄幻',icon:'🌌',desc:'异世界·洪荒·东方玄幻'},
+  {id:'xiuxian', name:'修仙',icon:'⚗️',desc:'修道长生·宗门争霸'},
+  {id:'dushi',   name:'都市',icon:'🏙',desc:'现代逆袭·隐世高手'},
+  {id:'chuanyue',name:'穿越',icon:'🌀',desc:'穿越古代·异界·穿书'},
+  {id:'xitong',  name:'系统',icon:'📊',desc:'签到·任务·面板成长'},
+  {id:'moshi',   name:'末世',icon:'☢️',desc:'丧尸·异能·星际求生'},
+  {id:'wuxian',  name:'无限',icon:'🎮',desc:'副本·游戏·诡秘规则'},
+  {id:'lishi',   name:'历史',icon:'📜',desc:'权谋·种田·军事争霸'},
+];
+const PLEASURES = [
+  {id:'逆袭打脸',icon:'👊',name:'逆袭打脸',desc:'废材觉醒·当众碾压'},
+  {id:'升级爽',  icon:'📈',name:'升级爽',  desc:'境界突破·越级战斗'},
+  {id:'系统面板',icon:'⚙️',name:'系统面板',desc:'随机奖励·数值成长'},
+  {id:'装逼收徒',icon:'😎',name:'装逼收徒',desc:'低调高手·被迫亮身份'},
+  {id:'复仇',    icon:'🗡️',name:'复仇',    desc:'卧薪尝胆·步步为营'},
+  {id:'种田积累',icon:'🌾',name:'种田积累',desc:'经营壮大·俯视天下'},
+  {id:'虐心牺牲',icon:'💔',name:'虐心牺牲',desc:'至亲陨落·含泪前行'},
+  {id:'绝境求生',icon:'🔥',name:'绝境求生',desc:'九死一生·意志如铁'},
+  {id:'背叛与觉醒',icon:'🗡️',name:'背叛觉醒',desc:'信任崩塌·浴火重生'},
+  {id:'失去与蜕变',icon:'🌑',name:'失去蜕变',desc:'珍贵幻灭·脱胎换骨'},
+  {id:'绝望翻盘',icon:'⚡',name:'绝望翻盘',desc:'全面崩盘·置之死地'},
+  {id:'反差萌',  icon:'😂',name:'反差萌',  desc:'人设反转·笑中带暖'},
+];
+
+let state={genre:null,pleasure:null,mode:'standard',taskId:null,eventSource:null,totalChapters:0,doneChapters:0,currentContentEl:null};
+
+/* ── 安全：HTML 转义，防止 XSS ───────────────────────────────── */
+function escapeHtml(str){
+  if(typeof str!=='string')return str;
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+function updateTotalChapters(){
+  const vols=parseInt(document.getElementById('sl-volumes').value);
+  const chaps=parseInt(document.getElementById('sl-chapters').value);
+  document.getElementById('val-total-chapters').textContent=vols*chaps;
+}
+
+function toggleInfiniteMode(){
+  const inf=document.getElementById('chk-infinite').checked;
+  document.getElementById('sl-volumes').disabled=inf;
+  if(inf){
+    document.getElementById('val-total-chapters').textContent='∞';
+  } else {
+    updateTotalChapters();
+  }
+}
+
+function init(){
+  document.getElementById('genre-grid').innerHTML=GENRES.map(g=>`
+    <div class="type-card" id="genre-${g.id}" onclick="selectGenre('${g.id}')">
+      <div class="icon">${g.icon}</div><div class="name">${g.name}</div><div class="desc">${g.desc}</div>
+    </div>`).join('');
+  document.getElementById('pleasure-grid').innerHTML=PLEASURES.map(p=>`
+    <div class="pleasure-card" id="pleasure-${p.id}" onclick="selectPleasure('${p.id}')">
+      <div class="p-icon">${p.icon}</div><div class="p-name">${p.name}</div><div class="p-desc">${p.desc}</div>
+    </div>`).join('');
+}
+
+function selectGenre(id){
+  state.genre=id;
+  document.querySelectorAll('.type-card').forEach(c=>c.classList.remove('selected'));
+  document.getElementById('genre-'+id)?.classList.add('selected');
+}
+function selectPleasure(id){
+  state.pleasure=id;
+  document.querySelectorAll('.pleasure-card').forEach(c=>c.classList.remove('selected'));
+  document.getElementById('pleasure-'+id)?.classList.add('selected');
+}
+function selectMode(mode,el){
+  state.mode=mode;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+}
+function updateSlider(inputId,valId){document.getElementById(valId).textContent=document.getElementById(inputId).value;}
+function switchTab(tab){
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',(i===0)===(tab==='create')));
+  document.getElementById('panel-create').classList.toggle('active',tab==='create');
+  document.getElementById('panel-history').classList.toggle('active',tab==='history');
+  if(tab==='history')loadHistory();
+}
+function toggleCollapse(header){
+  const body=header.nextElementSibling;
+  const open=body.classList.toggle('open');
+  header.querySelector('span:last-child').textContent=open?'▾':'▸';
+}
+function setStatus(msg){document.getElementById('status-text').textContent=msg;}
+function setProgress(pct){document.getElementById('progress-bar').style.width=Math.min(100,pct)+'%';}
+function finishUI(){
+  document.getElementById('btn-generate').disabled=false;
+  document.getElementById('btn-cancel').style.display='none';
+  if(state.eventSource){state.eventSource.close();state.eventSource=null;}
+}
+
+async function startGenerate(){
+  const name=document.getElementById('inp-name').value.trim();
+  const bg=document.getElementById('inp-background').value.trim();
+  const gf=document.getElementById('inp-golden').value.trim();
+  if(!state.genre){alert('请选择小说类型');return;}
+  if(!state.pleasure){alert('请选择核心爽点');return;}
+  if(!name){alert('请输入主角姓名');return;}
+  if(!bg){alert('请描述主角起点设定');return;}
+  if(!gf){alert('请描述主角金手指/外挂');return;}
+
+  const genreObj=GENRES.find(g=>g.id===state.genre);
+  const vols=parseInt(document.getElementById('sl-volumes').value);
+  const chaps=parseInt(document.getElementById('sl-chapters').value);
+  state.totalChapters=vols*chaps;
+  state.doneChapters=0;
+
+  const payload={
+    genre:genreObj?.name||state.genre, sub_genre:'',
+    core_pleasure:state.pleasure,
+    protagonist_name:name, protagonist_background:bg, golden_finger:gf,
+    world_desc:document.getElementById('inp-world').value.trim(),
+    antagonist_direction:document.getElementById('inp-antag').value.trim(),
+    romance:document.getElementById('inp-romance').value.trim(),
+    num_volumes:vols, chapters_per_volume:chaps,
+    words_per_chapter:parseInt(document.getElementById('sl-words').value),
+    quality_mode:state.mode,
+    interactive:document.getElementById('chk-interactive').checked,
+    mode:document.getElementById('chk-infinite').checked?'infinite':'bounded',
+  };
+
+  let taskId;
+  try{
+    const res=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json();
+    taskId=data.task_id;
+  }catch(e){alert('启动失败：'+e.message);return;}
+
+  state.taskId=taskId;
+  document.getElementById('gen-area').innerHTML='';
+  document.getElementById('gen-area').style.display='block';
+  document.getElementById('welcome').style.display='none';
+  document.getElementById('btn-generate').disabled=true;
+  document.getElementById('btn-cancel').style.display='block';
+  setProgress(2);
+
+  const es=new EventSource(`/api/stream/${taskId}`);
+  state.eventSource=es;
+  es.addEventListener('status',             e=>onStatus(JSON.parse(e.data)));
+  es.addEventListener('world_ready',        e=>onWorldReady(JSON.parse(e.data)));
+  es.addEventListener('characters_ready',   e=>onCharsReady(JSON.parse(e.data)));
+  es.addEventListener('plot_ready',         e=>onPlotReady(JSON.parse(e.data)));
+  es.addEventListener('volume_outline_ready',e=>onVolumeOutline(JSON.parse(e.data)));
+  es.addEventListener('chapter_start',      e=>onChapterStart(JSON.parse(e.data)));
+  es.addEventListener('chunk',              e=>onChunk(JSON.parse(e.data)));
+  es.addEventListener('thinking',           e=>onThinking(JSON.parse(e.data)));
+  es.addEventListener('approval_required',  e=>onApprovalRequired(JSON.parse(e.data)));
+  es.addEventListener('correction_applied', e=>onCorrectionApplied(JSON.parse(e.data)));
+  es.addEventListener('checker_start',      e=>onCheckerStart(JSON.parse(e.data)));
+  es.addEventListener('chapter_done',       e=>onChapterDone(JSON.parse(e.data)));
+  es.addEventListener('novel_complete',     e=>onComplete(JSON.parse(e.data)));
+  es.addEventListener('cancelled',          e=>{setStatus('已取消');finishUI();});
+  es.addEventListener('error',              e=>onError(JSON.parse(e.data)));
+  es.onerror=()=>{setStatus('连接断开');finishUI();};
+}
+
+document.getElementById('btn-cancel').onclick=async()=>{
+  if(state.taskId)await fetch(`/api/cancel/${state.taskId}`,{method:'POST'});
+};
+
+function onStatus(d){setStatus(d.message);}
+
+function onWorldReady(world){
+  setProgress(15);
+  const area=document.getElementById('gen-area');
+  const ps=world.power_system;
+  const typeMap={protagonist_side:'主角方',enemy_near:'近期敌',enemy_mid:'中期敌',enemy_boss:'终极敌',neutral:'中立',ally:'盟友'};
+  const typeColor={enemy_near:'enemy',enemy_mid:'enemy',enemy_boss:'enemy',ally:'ally'};
+  const levelsHtml=ps.levels.map((lv,i)=>`${i>0?'<span class="power-arrow">›</span>':''}<div class="power-level"><div class="lv-name">${lv.name}</div><div class="lv-power">${lv.typical_power}</div></div>`).join('');
+  const factionsHtml=world.factions.map(f=>`<div class="faction-card ${typeColor[f.faction_type]||''}"><div class="f-type">${typeMap[f.faction_type]||f.faction_type}</div><div class="f-name">${f.name}</div><div class="f-desc">${f.description}</div>${f.leader?`<div style="font-size:10px;color:var(--text3);margin-top:4px">领袖：${f.leader}</div>`:''}</div>`).join('');
+  area.insertAdjacentHTML('beforeend',`
+    <div class="section-card" id="sec-world">
+      <h2>🌍 世界观 <span class="badge badge-world">已生成</span></h2>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">${world.description}</p>
+      <div class="section-title"><span class="st-num">⚡</span> ${ps.name}</div>
+      <div class="power-levels">${levelsHtml}</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">突破条件：${ps.breakthrough_conditions}</div>
+      <div class="section-title"><span class="st-num">🏰</span> 势力格局</div>
+      <div class="faction-grid">${factionsHtml}</div>
+    </div>`);
+}
+
+function onCharsReady(d){
+  setProgress(28);
+  const area=document.getElementById('gen-area');
+  const roleMap={protagonist:'主角',love_interest:'感情线',sidekick:'挚友',mentor:'师父'};
+  const charsHtml=d.characters.map(c=>`
+    <div class="char-card ${c.role==='protagonist'?'protagonist':''}">
+      <div class="char-role">${roleMap[c.role]||c.role}</div>
+      <div class="char-name">${c.name}</div>
+      <div><span class="char-power">${c.current_power}</span></div>
+      <div class="char-detail" style="margin-top:6px">${c.personality}</div>
+      <div class="char-detail" style="color:var(--text3);font-size:10px;margin-top:4px">动机：${c.motivation}</div>
+      ${c.golden_finger?`<div style="color:var(--gold);font-size:10px;margin-top:4px">金手指：${c.golden_finger}</div>`:''}
+      <div class="char-speech">「${c.speech_pattern}」</div>
+    </div>`).join('');
+  const antagsHtml=d.antagonists.map(a=>`
+    <div class="antag-item">
+      <span class="antag-tier">第${a.tier}层</span>
+      <div>
+        <div class="antag-name">${a.name} <span style="font-size:10px;color:var(--text3)">${a.current_power} · 第${a.defeat_volume}卷解决</span></div>
+        <div class="antag-detail">动机：${a.motive} | 弱点：${a.weakness}</div>
+      </div>
+    </div>`).join('');
+  area.insertAdjacentHTML('beforeend',`
+    <div class="section-card">
+      <h2>👥 人物档案 <span class="badge badge-chars">已生成</span></h2>
+      <div class="char-grid">${charsHtml}</div>
+      <div class="divider"></div>
+      <div class="section-title"><span class="st-num">⚔</span> 反派梯队</div>
+      <div class="antag-list">${antagsHtml}</div>
+    </div>`);
+}
+
+function onPlotReady(d){
+  setProgress(40);
+  const area=document.getElementById('gen-area');
+  document.title=d.title+' · 网文AI引擎';
+  const pf=d.plot_framework;
+  const msHtml=pf.milestones.map(m=>`<div class="milestone-item"><div class="milestone-num">${m.index}</div><div><div class="milestone-title">${m.title} <span style="font-size:10px;color:var(--text3)">第${m.volume}卷</span></div><div class="milestone-desc">${m.description}</div></div></div>`).join('');
+  const volsHtml=d.volumes.map(v=>`<div class="vol-card" onclick="scrollTo('vol-outline-${v.volume_num}')"><div class="vol-num">第${v.volume_num}卷</div><div class="vol-title">${v.title}</div><div class="vol-theme">${v.theme}</div><div class="vol-power">${v.protagonist_power_start} → ${v.protagonist_power_end}</div><div class="vol-pleasure">${v.core_pleasure_point}</div></div>`).join('');
+  area.insertAdjacentHTML('beforeend',`
+    <div class="section-card">
+      <h2>📖 《${d.title}》 <span class="badge badge-plot">规划完成</span></h2>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">终极目标：${pf.ultimate_goal}</div>
+      <div class="section-title"><span class="st-num">⭐</span> 里程碑事件</div>
+      <div class="milestone-list">${msHtml}</div>
+      <div class="divider"></div>
+      <div class="section-title"><span class="st-num">📚</span> 分卷概览</div>
+      <div class="volume-overview">${volsHtml}</div>
+    </div>`);
+}
+
+function onVolumeOutline(d){
+  const area=document.getElementById('gen-area');
+  const chapHtml=(d.chapters||[]).map(c=>`
+    <div class="co-item ${c.pleasure_point?'has-pleasure':''}">
+      <div class="co-header">
+        <span class="co-num">第${c.chapter_num}章</span>
+        <span class="co-title">${c.title}</span>
+        ${c.pleasure_point?'<span class="co-pleasure-badge">⚡爽点</span>':''}
+      </div>
+      <div class="co-events">${(c.core_events||[]).map(e=>'• '+e).join('<br>')}</div>
+      ${c.pleasure_point?`<div style="font-size:10px;color:var(--gold);margin-top:4px">爽点：${c.pleasure_point}</div>`:''}
+      <div class="co-hook">↩ ${c.hook_end}</div>
+    </div>`).join('');
+  area.insertAdjacentHTML('beforeend',`
+    <div class="section-card" id="vol-outline-${d.volume_num}">
+      <h2>📋 第${d.volume_num}卷《${d.title}》大纲 <span class="badge badge-outline">已规划</span></h2>
+      <div class="chapter-outline-list">${chapHtml}</div>
+    </div>`);
+}
+
+function onChapterStart(d){
+  state.doneChapters++;
+  setProgress(55+(state.doneChapters/state.totalChapters)*40);
+  setStatus(`写作第${d.chapter_num}章《${d.title}》${d.pleasure_point?'（⚡含爽点）':''}...`);
+  const area=document.getElementById('gen-area');
+  const el=document.createElement('div');
+  el.className='chapter-card';
+  el.id=`ch-${d.chapter_num}`;
+  el.innerHTML=`
+    <div class="chapter-header" onclick="toggleChapter(${d.chapter_num})">
+      <span class="ch-vol-badge">第${d.volume_num}卷</span>
+      <span class="ch-num">第${d.volume_chapter_num}章</span>
+      <span class="ch-title">${escapeHtml(d.title)}</span>
+      <div class="ch-badges" id="ch-badges-${d.chapter_num}">
+        ${d.pleasure_point?'<span class="ch-badge pleasure-badge">⚡爽点</span>':''}
+        <span class="ch-badge" id="ch-status-${d.chapter_num}" style="background:rgba(124,111,255,0.15);color:var(--accent)">
+          <span class="loading-dots"><span></span><span></span><span></span></span> 写作中
+        </span>
+      </div>
+      <span class="ch-toggle" id="ch-toggle-${d.chapter_num}">▾</span>
+    </div>
+    <div class="chapter-body expanded" id="ch-body-${d.chapter_num}">
+      <div class="chapter-content" id="ch-content-${d.chapter_num}"><span class="typing-cursor"></span></div>
+    </div>`;
+  area.appendChild(el);
+  el.scrollIntoView({behavior:'smooth',block:'start'});
+  state.currentContentEl=document.getElementById(`ch-content-${d.chapter_num}`);
+}
+
+function onChunk(d){
+  const el=state.currentContentEl;
+  if(!el)return;
+  const cursor=el.querySelector('.typing-cursor');
+  if(cursor)cursor.remove();
+  el.appendChild(document.createTextNode(d.text));
+  const nc=document.createElement('span');
+  nc.className='typing-cursor';
+  el.appendChild(nc);
+}
+
+function onCheckerStart(d){
+  const el=document.getElementById(`ch-status-${d.chapter_num}`);
+  if(el)el.innerHTML='🔍 校验中';
+}
+
+function onChapterDone(d){
+  const statusEl=document.getElementById(`ch-status-${d.chapter_num}`);
+  const contentEl=document.getElementById(`ch-content-${d.chapter_num}`);
+  const badgesEl=document.getElementById(`ch-badges-${d.chapter_num}`);
+  const cursor=contentEl?.querySelector('.typing-cursor');
+  if(cursor)cursor.remove();
+  if(statusEl)statusEl.style.display='none';
+  if(badgesEl){
+    if(d.hook_strength>0){const b=document.createElement('span');b.className='ch-badge hook-badge';b.textContent=`🪝${d.hook_strength}分`;badgesEl.appendChild(b);}
+    if(d.consistency_issues?.length>0){const b=document.createElement('span');b.className='ch-badge issue-badge';b.textContent=`⚠${d.consistency_issues.length}项`;badgesEl.appendChild(b);}
+  }
+  if(d.consistency_issues?.length>0&&contentEl){
+    const notes=document.createElement('div');
+    notes.className='chapter-notes';
+    notes.innerHTML=d.consistency_issues.map(i=>`<div class="note-item">${escapeHtml(i)}</div>`).join('');
+    contentEl.parentElement.appendChild(notes);
+  }
+  setTimeout(()=>{
+    const body=document.getElementById(`ch-body-${d.chapter_num}`);
+    const toggle=document.getElementById(`ch-toggle-${d.chapter_num}`);
+    if(body){body.classList.remove('expanded');if(toggle)toggle.textContent='▸';}
+  },2000);
+}
+
+/* ── 新增事件处理器 ────────────────────────────────────────── */
+
+function onThinking(d){
+  /* d: {agent, text} — 展示 Agent 推理过程 */
+  const area=document.getElementById('gen-area');
+  const agentLabel={'plot_planner':'剧情规划师','chapter_outliner':'章节大纲师'}[d.agent]||d.agent;
+  const card=document.createElement('div');
+  card.className='section-card';
+  card.style.borderColor='rgba(139,92,246,0.4)';
+  card.innerHTML=`
+    <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="this.nextElementSibling.classList.toggle('expanded')">
+      <span class="badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">🧠 思考过程</span>
+      <span style="font-size:13px;color:var(--text2)">${agentLabel} 的推理</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--text3)">点击展开</span>
+    </div>
+    <div class="ch-body" style="font-size:12px;color:var(--text3);white-space:pre-wrap;max-height:300px;overflow-y:auto">${escapeHtml(d.text.slice(0,3000))}</div>`;
+  area.appendChild(card);
+}
+
+function onApprovalRequired(d){
+  /* d: {checkpoint_id, agent_name, data, editable_fields} */
+  const agentLabels={'world_builder':'世界构建师','character_designer':'角色设计师','plot_planner':'剧情规划师'};
+  const label=agentLabels[d.agent_name]||d.agent_name;
+
+  // 创建模态框
+  const overlay=document.createElement('div');
+  overlay.id='approval-overlay';
+  overlay.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;';
+
+  const modal=document.createElement('div');
+  modal.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto;padding:24px;';
+  modal.innerHTML=`
+    <h2 style="margin:0 0 16px;font-size:18px;color:var(--text)">🤝 ${label}请求审批</h2>
+    <div style="font-size:13px;color:var(--text2);max-height:300px;overflow-y:auto;background:var(--bg);padding:12px;border-radius:8px;margin-bottom:16px;white-space:pre-wrap">${escapeHtml(JSON.stringify(d.data,null,2).slice(0,5000))}</div>
+    <textarea id="approval-feedback" placeholder="反馈意见（可选）" style="width:100%;min-height:60px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:13px;resize:vertical;margin-bottom:16px;box-sizing:border-box;"></textarea>
+    <div style="display:flex;gap:12px;justify-content:flex-end">
+      <button onclick="submitApproval('reject')" style="padding:8px 20px;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;font-size:13px">✖ 拒绝重做</button>
+      <button onclick="submitApproval('approve')" style="padding:8px 20px;background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:8px;cursor:pointer;font-size:13px">✓ 通过</button>
+    </div>`;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  window._approvalData={taskId:state.taskId,checkpoint_id:d.checkpoint_id};
+}
+
+async function submitApproval(action){
+  const data=window._approvalData;
+  if(!data)return;
+  const feedback=document.getElementById('approval-feedback')?.value||'';
+  try{
+    await fetch(`/api/approve/${data.taskId}`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({checkpoint_id:data.checkpoint_id,action,feedback}),
+    });
+  }catch(e){console.error('审批提交失败',e);}
+  document.getElementById('approval-overlay')?.remove();
+  window._approvalData=null;
+}
+
+function onCorrectionApplied(d){
+  /* d: {chapter_num, hook_strength, issues_fixed} */
+  const badgesEl=document.getElementById(`ch-badges-${d.chapter_num}`);
+  if(badgesEl){
+    const b=document.createElement('span');
+    b.className='ch-badge';
+    b.style.cssText='background:rgba(34,197,94,0.15);color:#22c55e;';
+    b.textContent=`🔧 已修正${d.issues_fixed||''}项`;
+    badgesEl.appendChild(b);
+  }
+}
+
+function onComplete(d){
+  setProgress(100);
+  setStatus(`《${d.title}》创作完成！`);
+  finishUI();
+  loadHistory();
+  const area=document.getElementById('gen-area');
+  const banner=document.createElement('div');
+  banner.id='complete-banner';
+  banner.innerHTML=`<h2>✅ 创作完成</h2><p>《${escapeHtml(d.title)}》已全部生成</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;">
+      <a href="/api/download/${state.taskId}/worldbuilding" download class="dl-btn">🌍 世界观</a>
+      <a href="/api/download/${state.taskId}/characters" download class="dl-btn">👤 人物设定</a>
+      <a href="/api/download/${state.taskId}/scenes" download class="dl-btn">🏞 场景设定</a>
+      <a href="${d.download_url}" download class="dl-btn">📖 全书下载</a>
+    </div>
+    <button onclick="startNewNovel()" style="margin-top:12px;padding:10px 24px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;">📝 开始新小说</button>`;
+  area.insertBefore(banner,area.firstChild);
+  banner.scrollIntoView({behavior:'smooth'});
+}
+
+function startNewNovel(){
+  // 重置状态
+  state.taskId=null;
+  state.doneChapters=0;
+  state.totalChapters=0;
+  if(state.eventSource){state.eventSource.close();state.eventSource=null;}
+  // 重置UI
+  document.getElementById('gen-area').innerHTML='';
+  document.getElementById('gen-area').style.display='none';
+  document.getElementById('welcome').style.display='block';
+  document.getElementById('btn-generate').disabled=false;
+  // 清空表单输入
+  document.getElementById('inp-name').value='';
+  document.getElementById('inp-background').value='';
+  document.getElementById('inp-golden').value='';
+  document.getElementById('inp-world').value='';
+  document.getElementById('inp-antag').value='';
+  document.getElementById('inp-romance').value='';
+  // 滚回顶部
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function onError(d){
+  setStatus('错误：'+d.message);
+  finishUI();
+  document.getElementById('gen-area').insertAdjacentHTML('beforeend',`
+    <div class="section-card" style="border-color:rgba(239,68,68,0.4)">
+      <h2 style="color:#ef4444">❌ 生成失败</h2>
+      <p style="font-size:13px;color:var(--text2)">${d.message}</p>
+    </div>`);
+}
+
+function toggleChapter(num){
+  const body=document.getElementById(`ch-body-${num}`);
+  const toggle=document.getElementById(`ch-toggle-${num}`);
+  const exp=body.classList.toggle('expanded');
+  toggle.textContent=exp?'▾':'▸';
+}
+
+function scrollTo(id){const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth'});}
+
+async function loadHistory(){
+  try{
+    const res=await fetch('/api/history');
+    const list=await res.json();
+    const container=document.getElementById('history-list');
+    if(!list.length){container.innerHTML='<div class="empty-state">暂无历史记录</div>';return;}
+    container.innerHTML=list.map(n=>`
+      <div class="history-item" id="hist-${n.task_id}">
+        <div class="history-title">${escapeHtml(n.title)}</div>
+        <div class="history-meta">${escapeHtml(n.genre||'')} · ${n.total_chapters||0}章 · ${escapeHtml(n.created_at)}</div>
+        <div class="history-actions" style="flex-wrap:wrap;">
+          <a href="/api/download/${n.task_id}/worldbuilding" download class="dl-btn" style="font-size:11px;">🌍 世界观</a>
+          <a href="/api/download/${n.task_id}/characters" download class="dl-btn" style="font-size:11px;">👤 人物</a>
+          <a href="/api/download/${n.task_id}" download class="dl-btn">⬇ 全书</a>
+          <button onclick="deleteHistory('${n.task_id}')">🗑 删除</button>
+        </div>
+      </div>`).join('');
+  }catch(e){}
+}
+
+async function deleteHistory(taskId){
+  if(!confirm('确认删除？'))return;
+  await fetch(`/api/history/${taskId}`,{method:'DELETE'});
+  document.getElementById('hist-'+taskId)?.remove();
+}
+
+init();
+</script>
+</body>
+</html>
