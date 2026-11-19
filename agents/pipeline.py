@@ -498,10 +498,9 @@ async def run_pipeline(
         if tracer:
             await queue.put(("trace_summary", tracer.get_summary()))
 
-        await queue.put(("novel_complete", {"title": title}))
-
-        # 存到队列的一个特殊槽位，供 main.py 取用保存
+        # 完成事件会终止 SSE 消费，必须先交付待保存的小说对象。
         await queue.put(("_novel_object", novel))
+        await queue.put(("novel_complete", {"title": title}))
 
     except asyncio.CancelledError:
         logger.info("Pipeline 已取消")

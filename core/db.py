@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -7,7 +8,7 @@ DB_PATH = Path("data/novels.db")
 
 def init_db() -> None:
     DB_PATH.parent.mkdir(exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS novels (
                 task_id        TEXT PRIMARY KEY,
@@ -34,7 +35,7 @@ def save_novel(
     total_chapters: int,
     markdown_path: str,
 ) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO novels
@@ -53,7 +54,7 @@ def save_novel(
 
 
 def list_novels(limit: int = 20) -> list[dict]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM novels ORDER BY created_at DESC LIMIT ?", (limit,)
@@ -62,14 +63,14 @@ def list_novels(limit: int = 20) -> list[dict]:
 
 
 def delete_novel(task_id: str) -> bool:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         cur = conn.execute("DELETE FROM novels WHERE task_id = ?", (task_id,))
         conn.commit()
     return cur.rowcount > 0
 
 
 def get_novel(task_id: str) -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT * FROM novels WHERE task_id = ?", (task_id,)

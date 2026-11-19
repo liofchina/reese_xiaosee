@@ -36,9 +36,10 @@ reese-ag 是一个 **AI 驱动的中文网文（Web Novel）自动生成引擎**
 - **多 Agent 流水线**：8 个 Agent 各司其职，输出自校验
 - **流式写作**：章节内容通过 SSE 实时推送，前端逐字显示
 - **跨章记忆**：EntityStore 追踪角色状态、信息差、时间线、冲突弧
-- **断点续写**：检查点机制，中断后可从任意位置恢复
+- **CLI 断点续写**：检查点机制，中断后跳过已完成章节继续执行
 - **多 LLM Provider**：支持 Anthropic / DeepSeek / 通义千问 / 月之暗面 / 智谱 / 豆包 / Ollama 本地模型
-- **Human-in-the-Loop**：交互模式下可审批/修改每个 Agent 输出
+- **Human-in-the-Loop**：Web 交互模式下可通过或拒绝关键阶段输出
+- **世界观察沙盘**：独立地图、人物与势力持续演化，规则模拟不依赖模型
 
 ### 1.2 技术栈
 
@@ -48,27 +49,55 @@ reese-ag 是一个 **AI 驱动的中文网文（Web Novel）自动生成引擎**
 | Web 框架 | FastAPI + Uvicorn |
 | 数据模型 | Pydantic v2 |
 | LLM SDK | anthropic, openai（OpenAI-Compatible） |
-| 数据库 | SQLite（历史持久化 + 调用追踪 + 语义缓存） |
-| 前端 | 单页 HTML（原生 JS + SSE） |
-| 协议 | SSE（Server-Sent Events）实时流 |
+| 数据库 | SQLite（小说历史、世界存档、调用追踪和请求内容缓存） |
+| 前端 | 原生 HTML / CSS / JavaScript |
+| 协议 | 小说生成使用 SSE，世界页面使用 HTTP JSON 定时同步 |
 
-### 1.3 代码统计
+### 1.3 当前运行边界
 
-| 类别 | 文件数 | 行数 |
-|------|--------|------|
-| Agent 模块 | 9 | ~2,900 |
-| 核心引擎 | 7 | ~2,400 |
-| 记忆系统 | 4 | ~770 |
-| 工具系统 | 3 | ~580 |
-| 数据模型 | 1 | ~280 |
-| 前端 | 1 | ~710 |
-| **总计** | **~34** | **~8,400** |
+- Web 与 CLI 共用 Agent、模型和基础组件，但分别使用线性流水线与可恢复执行引擎。
+- 断点恢复和动态续卷仅接入 CLI；Web 的 deep 模式另有质量评审。
+- 当前主链路只启用 EntityStore 与 RhythmTracker，高级记忆模块尚未由 MemoryManager 启用。
+- DAG 编排、MCP 桥接等是独立的扩展组件，不代表已接入默认生成流程。
+
+### 1.4 世界在线子系统
+
+`/world` 提供两套兼容规则，原小说创作页面仍在 `/`。`classic` 保留六处地点、三方势力和九位人物的仙侠沙盘；`living` 是七处地点、三十个人与两股组织的首个因果世界切片。两者不导入已生成小说，也不提供多人角色扮演。旧JSON缺少 `ruleset` 时按经典规则读取；API创建默认仍为经典规则，页面显式选择因果规则，不重写旧档历史。
+
+| 层面 | 实现 | 职责 |
+|------|------|------|
+| 数据模型 | [models/world.py](../models/world.py) | 世界、生活状态、行程、认知、市场、道路、物资账本、命令和事实校验 |
+| 规则入口 | [domain/world_simulation.py](../domain/world_simulation.py) | 按规则集分派，保留经典演化行为 |
+| 因果规则 | [domain/living_world.py](../domain/living_world.py) | 自然产出、生命消耗、基于处境的计划、物流交易、工程、研究及公共财政 |
+| 共同事实 | [domain/world_events.py](../domain/world_events.py) | 递增事实编号、前因校验、字段变化和近期窗口 |
+| 存档 | [core/world_store.py](../core/world_store.py) | 独立SQLite库 `data/worlds.db`，同事务保存完整JSON快照与事实归档 |
+| 运行时 | [core/world_runtime.py](../core/world_runtime.py) | 自动时钟、命令串行化、存档提交和按需 AI |
+| 接口 | [core/world_api.py](../core/world_api.py) | `/api/worlds` 下的创建、控制、干预、纪事与对话接口 |
+| 页面 | [world.html](../resources/static/world.html)、[world.css](../resources/static/world.css)、[world.js](../resources/static/world.js) | 地图、人物详情、势力、时间控制和事件簿 |
+
+规则推进与存储分离：运行时通过 `WorldState.snapshot()` 重建独立字段快照并计算下一步，成功保存后才替换当前状态。快照使用Pydantic字段导出与校验重建，嵌套状态互不共享。自动存档或规则校验失败会暂停并报告错误，保留最后成功进度。
+
+`WorldState.events` 只保留近期200条事实；不参与序列化的 `pending_events` 保存本次生成的所有事实，避免单日超过窗口时丢失记录。`WorldStore.save()` 在一个SQLite事务中写入 `worlds` 快照和 `world_events` 事实，成功后才清空待提交批次。历史以世界ID和事实ID联合唯一，支持排他编号游标与人物／地点筛选，删除世界时一同删除。现存旧档只可补入仍在快照中的事实；已经截去的旧历史不可恢复。此处不是纯事件溯源或逐帧回放，恢复仍依靠完整快照。AI回复保留20条。
+
+因果规则的每日顺序为环境变化、生命消耗、市价更新、人物行动、公共财政与状态校验。人物先处理持续行程和生存压力，再根据职业、库存、消息与计划决定行动；不通过语言模型随意宣布结果。市场的供给、收购容量和现金都有限，交易两侧同时扣增。自然生长计入产出，吃饭、研究、修桥与施术计入消耗；`WorldState` 校验全体采区、货栈、人物与工地的物资总量，以及人物、货栈、公库与工程款的货币总量。货币不得凭空增发。
+
+桥梁修复消耗12份木材、4份矿石与12个工日，材料必须被工匠运输到场。三次消耗矿石的独立研究可解锁引流；一次施术消耗2份矿石、35点精力，降低水位25点，并使断桥处临时可渡至当前日加3，耗时比桥面多一日。暴雨可能冲毁桥梁或浅滩。路况、市价只通过到场感知和同地消息传递进入人物认知；近期洪水记忆影响风险选路。公营货栈每七日结算部分现金结余至所属公库，交易税、工资、救济、修桥追加款也都是真实转账。尚无代际人口、婚姻、战争、通用建筑或完整生态网络。
+
+经典规则仍先进行环境恢复和繁荣消耗，再执行人物行动与势力事务。繁荣消耗为随机0–1点加当前繁荣值整除50，下限0；经商人物的交易、旅行、采集、修炼权重为3:1:1:1。这些既有调整只影响后续推进，不迁移旧事件或补算历史消耗；种子复现以相同规则版本、种子及干预序列为准。
+
+应用生命周期负责加载世界与运行时钟。新建世界暂停；经典世界重启后暂停，因果世界保留手动开始／暂停的运行意图，已开始的世界重启后继续。两者都不补算停机时间。默认15秒一日，可设3–120秒。关闭浏览器不停止服务器演化；页面每2秒同步，隐藏标签页暂停轮询。全天在线仍依赖常驻服务。
+
+AI仅在主动请求纪事或对话时调用，使用 `world_chronicle` 和 `world_dialogue` 路由，不参与数值决策。因果世界的人物对话只接收自己的记忆、已知消息和自身状态，不注入他人未获知的秘密；逝者不能继续对话。回复基于请求快照并合并到最新状态，避免覆盖并发进度；请求结束关闭模型客户端。模型缺失或调用失败明确报错，规则世界仍可运行。
+
+运行时锁与自动时钟均为单进程机制，部署必须使用一个 worker。当前没有账户和权限隔离，仅适用于可信本机或内网，不能直接作为公开多人服务部署。启动和接口用法见 [README.md](README.md#世界在线观察一个持续演化的仙侠世界)。
 
 ---
 
 ## 2. 系统架构总览
 
 ### 2.1 核心数据流
+
+下图是 Agent 能力总览；质量评审对应 Web deep 模式，故事扩展对应 CLI infinite 模式。
 
 ```
 用户请求（WebNovelRequest）
@@ -119,38 +148,42 @@ WebNovelResult → Markdown 导出 + SQLite 持久化
 │  └──────────────┘  └──────────────┘  └──────────────┘  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │ Tracer       │  │ Cache        │  │ ModelRouter  │  │
-│  │ 调用追踪/成本 │  │ 语义缓存     │  │ 模型路由     │  │
+│  │ 调用追踪/成本 │  │ 请求内容缓存 │  │ 模型路由     │  │
 │  └──────────────┘  └──────────────┘  └──────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### 2.3 双入口
 
-| 入口 | 文件 | 用途 |
-|------|------|------|
-| Web 服务 | `main.py` | FastAPI + SSE，浏览器交互 |
-| 命令行 | `generate.py` | CLI，脚本化批量生成 |
+| 入口 | 执行路径 | 用途 |
+|------|----------|------|
+| Web 服务 | `main.py` → `agents/pipeline.py` | FastAPI + SSE、人工审批、deep 质量评审 |
+| 命令行 | `generate.py` → `runner.py` | 检查点恢复、分卷输出、动态续卷 |
 
-两者共用 `runner.py`（ResumableRunner）作为底层执行引擎。
+两者目前未统一执行引擎。Web 任务状态只保存在进程内，部署必须保持单 worker；
+需要可恢复任务时使用 CLI，而不是依赖 Web 的无限模式开关。
 
 ---
 
 ## 3. 目录结构
 
 ```
-reese-ag/
-├── main.py                     # FastAPI 应用入口 (~240 行)
-├── generate.py                 # CLI 入口 (~300 行)
-├── runner.py                   # 断点续写引擎 (~480 行)
-├── llm_client.py               # 多 Provider LLM 抽象 (~1,000 行)
-├── db.py                       # SQLite 持久化 (~80 行)
-├── cache.py                    # LLM 语义缓存 (~130 行)
-├── observability.py            # Token 追踪 & 成本估算 (~210 行)
-├── orchestrator.py             # DAG 编排引擎（预留） (~300 行)
-├── prompt_loader.py            # Prompt 版本管理 (~125 行)
-├── disciplines.py              # 20 学科知识注入 (~640 行)
-├── pleasure_system.py          # 爽点释放公式 (~265 行)
-├── guardrails.py               # 安全护栏 (~110 行)
+reese_xiaosee/
+├── main.py                     # FastAPI 应用入口
+├── generate.py                 # CLI 入口
+├── runner.py                   # CLI 断点续写引擎
+├── core/
+│   ├── llm_client.py           # Provider 适配与用量/预算管理
+│   ├── db.py                   # SQLite 历史记录
+│   ├── cache.py                # 请求内容哈希缓存
+│   ├── exporters.py            # Markdown / TXT / EPUB 导出
+│   ├── observability.py        # 追踪存储与成本估算
+│   ├── prompt_loader.py        # Prompt 版本管理
+│   └── guardrails.py           # 输入输出护栏
+├── domain/
+│   ├── orchestrator.py         # DAG 编排组件（未接入默认入口）
+│   ├── disciplines.py          # 学科知识注入
+│   └── pleasure_system.py      # 爽点与叙事规则
 │
 ├── models/
 │   └── novel.py                # Pydantic 数据模型 (~280 行)
@@ -168,6 +201,7 @@ reese-ag/
 │   └── plot_extender.py        # Agent 8: 故事扩展 (~180 行)
 │
 ├── memory/
+│   ├── manager.py              # CLI 核心记忆聚合管理
 │   ├── __init__.py             # 导出 EntityStore 等
 │   ├── entity_store.py         # 实体记忆系统 (~540 行)
 │   ├── extractor.py            # LLM 状态提取器 (~110 行)
@@ -179,14 +213,18 @@ reese-ag/
 │   ├── reference_tools.py      # 参考查询工具 (~280 行)
 │   └── mcp_client.py           # MCP 外部工具桥接 (~200 行)
 │
-├── static/
-│   └── index.html              # 前端单页应用 (~710 行)
+├── resources/
+│   ├── .env.example            # 配置模板
+│   └── static/index.html       # 前端单页应用
 │
-├── .env.example                # 配置模板
 ├── requirements.txt            # 依赖清单
-├── README.md                   # 快速启动指南
-├── PROJECT.md                  # 本文档
-├── 创作流程.md                  # 网文创作流程设计文档
+├── requirements-dev.txt        # 测试与检查工具
+├── tests/                      # 单元与关键链路回归测试
+├── scripts/                    # 启动脚本
+├── docs/
+│   ├── README.md               # 快速启动指南
+│   ├── PROJECT.md              # 本文档
+│   └── 创作流程.md              # 创作流程设计
 │
 ├── data/                       # SQLite 数据库（自动创建）
 ├── output/                     # 生成的 Markdown（自动创建）
@@ -214,7 +252,7 @@ reese-ag/
 | `world_desc` | str | "" | 世界观简述（可选） |
 | `antagonist_direction` | str | "" | 反派方向（可选） |
 | `romance` | str | "" | 感情线设定（可选） |
-| `num_volumes` | int | 3 | 规划卷数（1-10） |
+| `num_volumes` | int | 3 | 初始规划卷数（≥1；Web 界面为 1-10） |
 | `chapters_per_volume` | int | 10 | 每卷章数（5-30） |
 | `words_per_chapter` | int | 2000 | 每章字数（1000-5000） |
 | `quality_mode` | str | "standard" | 质量模式：standard / deep |
@@ -395,7 +433,8 @@ create_client()  # 读取 LLM_PROVIDER 环境变量，返回对应 Client 实例
 
 ### 5.4 模型路由
 
-通过 `MODEL_ROUTING` 环境变量配置不同 Agent 使用不同模型：
+底层通过 `MODEL_ROUTING` 环境变量配置路由，仅调用方显式传入 `agent_name` 时生效。
+当前默认 Agent 调用尚未完整传入该参数，不能仅配置环境变量就假定全部阶段已分流：
 
 ```json
 {"writer_summary": "claude-haiku-4-5-20251001", "plot_planner": "claude-opus-4-6"}
@@ -649,7 +688,11 @@ async def run_pipeline(request, queue, cancel_event, in_queue=None, task_id=""):
 5. Agent 1-4 依次执行（每个 Agent 后检查 cancel_event）
 6. 构建 WebNovelOutline + 初始化 EntityStore + RhythmTracker + ToolRegistry
 7. 逐章循环：Writer → ConsistencyChecker → QualityCritic → 更新记忆
-8. 输出安全扫描 + Markdown 导出
+8. 输出安全扫描，先发送内部 `_novel_object`，再发送 `novel_complete`
+9. Web 消费完成事件后保存四个 Markdown 文件与 SQLite 历史，成功后才返回下载链接
+
+内部结果必须先于完成事件入队，因为完成事件会结束 SSE 消费。
+结果缺失、文件写入失败或 SQLite 保存失败时，Web 返回 `error`，不返回成功完成事件。
 
 ### 7.2 SSE 事件流
 
@@ -672,7 +715,7 @@ async def run_pipeline(request, queue, cancel_event, in_queue=None, task_id=""):
 | `chapter_done` | dict | ChapterResult |
 | `approval_required` | dict | {checkpoint_id, agent_name, data, editable_fields} |
 | `trace_summary` | dict | LLM 调用统计 |
-| `novel_complete` | dict | {title} |
+| `novel_complete` | dict | Web 输出 {title, download_url}，表示保存成功 |
 | `cancelled` | str | 用户取消 |
 | `error` | str | 异常信息 |
 
@@ -680,20 +723,25 @@ async def run_pipeline(request, queue, cancel_event, in_queue=None, task_id=""):
 
 交互模式下（`interactive=True`），在以下节点暂停等待用户审批：
 
-1. 世界观完成后（可修改 description, resource_system, special_rules）
-2. 角色设计完成后（可修改 characters, antagonists）
-3. 剧情规划完成后（可修改 title, volumes）
+1. 世界观完成后
+2. 角色设计完成后
+3. 剧情规划完成后
 
 审批流程：
 - Pipeline 发送 `approval_required` 事件
 - 等待用户通过 `in_queue` 回复 ApprovalResponse
 - `approve`：继续
-- `reject` + feedback：Agent 根据反馈重新生成
+- `reject`：使用原输入重新生成一次；当前 feedback 仅用于状态展示，尚未注入生成上下文
 - 超时（10分钟）：自动通过
+
+当前界面支持通过与拒绝重做，尚未把 `edited_data` 应用到阶段结果。
 
 ---
 
 ## 8. 记忆与状态系统
+
+主链路启用 EntityStore 与 RhythmTracker。CLI 的 `MemoryManager` 聚合这两个子系统；
+其他追踪器虽保留实现及单元测试，目前未由该管理器启用。
 
 ### 8.1 EntityStore（memory/entity_store.py）
 
@@ -925,7 +973,8 @@ checkpoints/{run_id}/
 └── chapter_{n:04d}.json  # 第 n 章写作结果
 ```
 
-**原子写入**：先写 `.tmp` 文件再 rename，防止写入中崩溃导致文件损坏。
+**原子写入**：在目标目录先写 `.tmp` 文件，再用 `Path.replace()` 替换目标文件。
+该操作支持 Windows 上覆盖已有检查点，恢复执行时可以继续更新同一个 `run.json`。
 
 ### 11.3 恢复逻辑
 
@@ -961,7 +1010,7 @@ checkpoints/{run_id}/
 
 ## 12. 可观测性
 
-### 12.1 Tracer（observability.py）
+### 12.1 Tracer（core/observability.py）
 
 **LLMCallTrace** — 单次 LLM 调用记录：
 
@@ -988,7 +1037,13 @@ deepseek-chat:              input=0.14, output=0.28
 
 **Tracer.get_summary()** → 总体统计 + 每 Agent 明细
 
-### 12.2 语义缓存（cache.py）
+LLMClient 的累计用量与预算检查独立于 Tracer。当前 Web 虽创建 Tracer，
+但尚未将 SDK 调用逐次接入 `record_llm_call()`，其摘要不能代替实际调用计数。
+LLMClient 按 Provider 返回的用量累计工具调用、补全、多轮调用及思考调用；
+流式调用在结束时记录用量。每次新请求前和累计用量后检查预算。
+Provider 未返回用量时会记录警告，无法准确计入该次费用；Ollama 流式用量仍为估算。
+
+### 12.2 请求内容缓存（core/cache.py）
 
 可选功能（`LLM_CACHE_ENABLED=true`）：
 - SQLite 存储
@@ -996,12 +1051,17 @@ deepseek-chat:              input=0.14, output=0.28
 - 低温度调用（temperature ≤ 0.5）自动缓存
 - 避免开发调试时重复 LLM 调用
 
-### 12.3 数据库（db.py）
+缓存按请求内容精确命中，不进行向量检索或语义相似度匹配。
+缓存命中不产生新的 Provider 调用，不重复计费。
+
+### 12.3 数据库（core/db.py）
 
 SQLite 表 `novels`：
-- task_id, title, genre, core_pleasure, quality_mode, chapters (int), created_at, markdown_path
+- task_id, title, genre, core_pleasure, quality_mode, num_volumes, total_chapters, created_at, markdown_path
 
-提供历史查询和导出管理。
+`markdown_path` 保存任务输出目录，同时兼容旧版单个 Markdown 文件。
+删除历史时只清理有效输出目录下的记录路径，不允许删除输出根目录或目录外路径。
+每次历史数据库操作完成后关闭连接，避免 Windows 文件句柄持续占用数据库。
 
 ---
 
@@ -1012,7 +1072,7 @@ SQLite 表 `novels`：
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/generate` | 启动生成任务，返回 {task_id} |
-| GET | `/api/stream/{task_id}` | SSE 事件流（600s 超时） |
+| GET | `/api/stream/{task_id}` | SSE 事件流（等待下一事件最多 1800s） |
 | POST | `/api/approve/{task_id}` | 交互模式审批回复 |
 | POST | `/api/cancel/{task_id}` | 取消生成 |
 | GET | `/api/history` | 历史记录（最近 20 条） |
@@ -1031,7 +1091,10 @@ async def stream_events(task_id):
     # novel_complete / error / cancelled 时结束流
 ```
 
-### 13.3 前端（static/index.html）
+任务队列保存在应用进程内。生产启动保持 `--workers 1`，不得直接改为多进程或多实例。
+当前保存依赖 SSE 消费到完成事件，生成期间应保持页面连接；Web 尚无检查点恢复能力。
+
+### 13.3 前端（resources/static/index.html）
 
 单页应用（~710 行 HTML+CSS+JS）：
 
@@ -1094,7 +1157,7 @@ python generate.py export <run-id>
 
 ## 15. 配置参考
 
-所有配置通过 `.env` 文件设置（复制 `.env.example`）。
+所有配置通过项目根目录的 `.env` 文件设置，模板位于 `resources/.env.example`。
 
 ### 15.1 LLM Provider 配置
 
@@ -1122,7 +1185,8 @@ python generate.py export <run-id>
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
 | `MODEL_ROUTING` | 模型路由（JSON） | — |
-| `LLM_CACHE_ENABLED` | 语义缓存开关 | false |
+| `LLM_CACHE_ENABLED` | 请求内容缓存开关 | false |
+| `MAX_COST_PER_RUN` | 单次运行的估算费用上限（美元） | 10.0 |
 | `GUARDRAIL_LEVEL` | 安全护栏级别：none/basic/strict | none |
 | `MCP_SERVERS` | MCP 外部工具服务器（JSON） | — |
 | `PROMPT_VERSION` | Prompt 版本号 | v1 |
@@ -1217,7 +1281,8 @@ Writer 的上下文窗口有限。EntityStore 按 8 级优先级排列信息，�
 
 ### 17.4 原子检查点
 
-所有 checkpoint 文件先写 `.tmp` 再 rename，保证写入原子性。崩溃后不会出现半写文件。恢复时自动跳过已完成章节。
+所有 checkpoint 文件先写同目录 `.tmp`，再通过 `Path.replace()` 替换目标，
+避免读取半写文件，并兼容 Windows 上的重复保存。恢复时跳过已完成章节。
 
 ### 17.5 多 Provider 统一抽象
 
@@ -1227,9 +1292,11 @@ Writer 的上下文窗口有限。EntityStore 按 8 级优先级排列信息，�
 
 `CharacterState.known_facts` 只增不减（除非有特殊设定如失忆）。这保证了信息差追踪的可靠性——角色"知道什么"永远是已知事实的超集。
 
-### 17.7 非阻塞质量评审
+### 17.7 deep 模式质量评审
 
-QualityCritic 失败不阻塞流水线。评分结果仅供参考和展示，不影响章节输出。ConsistencyChecker 的自动修正才是强制性的质量保障。
+Web deep 模式同步等待 QualityCritic，低分且有改进建议时最多进行一次局部修正；
+修正失败会记录警告并保留已有内容。评审阶段本身失败仍会由流水线返回错误。
+CLI deep 模式目前仅执行 ConsistencyChecker。
 
 ### 17.8 向后兼容的序列化
 

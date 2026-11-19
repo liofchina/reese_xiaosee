@@ -17,13 +17,18 @@ LLMClient — 多 Provider 适配层
 """
 
 import json
+import logging
 import os
 import re
-import logging
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Callable
-from core.cache import get_cache
+from typing import TYPE_CHECKING, AsyncIterator, Callable
+
 import httpx
+
+from core.cache import get_cache
+
+if TYPE_CHECKING:
+    from openai.types import CompletionUsage
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +96,7 @@ class LLMClient(ABC):
         if self._call_count % 5 == 0:
             logger.info(f"[费用] 累计: ${self._total_cost_usd:.4f} / ${self._max_cost:.2f} "
                        f"(调用{self._call_count}次, {self._total_tokens_in+self._total_tokens_out:,} tokens)")
+        self.check_budget()
 
     def check_budget(self):
         """检查是否超出预算，超出则抛出异常"""
@@ -110,6 +116,10 @@ class LLMClient(ABC):
             "total_calls": self._call_count,
             "budget_remaining_usd": round(self._max_cost - self._total_cost_usd, 4),
         }
+
+    async def close(self) -> None:
+        """释放底层 HTTP 连接；持有连接的 Provider 应覆盖此方法。"""
+        raise NotImplementedError("当前 Provider 未实现资源释放")
 
     @abstractmethod
     async def tool_call(
@@ -201,6 +211,9 @@ class AnthropicClient(LLMClient):
         self.client = _anthropic.AsyncAnthropic()
         self.model = os.getenv("MODEL", "claude-sonnet-4-6")
 
+    async def close(self) -> None:
+        await self.client.close()
+
     async def tool_call(
         self,
         system: str,
@@ -219,6 +232,7 @@ class AnthropicClient(LLMClient):
             cached = cache.get(system, prompt, tool_name, model)
             if cached is not None:
                 return cached
+        self.check_budget()
         try:
             msg = await self.client.messages.create(
                 model=model,
@@ -232,7 +246,6 @@ class AnthropicClient(LLMClient):
             # 追踪费用
             if hasattr(msg, 'usage'):
                 self._track_usage(model, msg.usage.input_tokens, msg.usage.output_tokens)
-            self.check_budget()
             result = msg.content[0].input
             # 写入缓存
             if cache.enabled and temperature <= 0.5:
@@ -255,6 +268,7 @@ class AnthropicClient(LLMClient):
     ) -> AsyncIterator[str]:
         import anthropic as _anthropic
         model = get_routed_model(agent_name, self.model) if agent_name else self.model
+        self.check_budget()
         try:
             async with self.client.messages.stream(
                 model=model,
@@ -269,7 +283,6 @@ class AnthropicClient(LLMClient):
                 final_msg = await s.get_final_message()
                 if hasattr(final_msg, 'usage'):
                     self._track_usage(model, final_msg.usage.input_tokens, final_msg.usage.output_tokens)
-                self.check_budget()
         except _anthropic.RateLimitError as e:
             raise ProviderRateLimitError(str(e)) from e
         except _anthropic.APIStatusError as e:
@@ -292,6 +305,7 @@ class AnthropicClient(LLMClient):
             cached = cache.get("", prompt, "complete", model)
             if cached is not None:
                 return cached.get("text", "")
+        self.check_budget()
         try:
             msg = await self.client.messages.create(
                 model=model,
@@ -302,7 +316,6 @@ class AnthropicClient(LLMClient):
             # 追踪费用
             if hasattr(msg, 'usage'):
                 self._track_usage(model, msg.usage.input_tokens, msg.usage.output_tokens)
-            self.check_budget()
             result = msg.content[0].text.strip()
             if cache.enabled and temperature <= 0.5:
                 cache.put("", prompt, "complete", model, {"text": result})
@@ -331,6 +344,7 @@ class AnthropicClient(LLMClient):
         final_result = None
 
         for turn in range(max_turns):
+            self.check_budget()
             try:
                 response = await self.client.messages.create(
                     model=self.model,
@@ -353,6 +367,9 @@ class AnthropicClient(LLMClient):
                 raise TypeError(
                     f"LLM 返回了非预期的原始文本（可能是 API Key 无效或 SDK 版本问题）：{response[:100]}"
                 )
+            self._track_usage(
+                self.model, response.usage.input_tokens, response.usage.output_tokens
+            )
             msgs.append({"role": "assistant", "content": response.content})
 
             # 检查是否有工具调用
@@ -415,6 +432,7 @@ class AnthropicClient(LLMClient):
         """带 Extended Thinking 的工具调用，返回 (tool_input, thinking_text)"""
         import anthropic as _anthropic
 
+        self.check_budget()
         try:
             msg = await self.client.messages.create(
                 model=self.model,
@@ -429,6 +447,7 @@ class AnthropicClient(LLMClient):
                     "budget_tokens": thinking_budget,
                 },
             )
+            self._track_usage(self.model, msg.usage.input_tokens, msg.usage.output_tokens)
             # 提取 thinking 和 tool_use
             thinking_text = ""
             tool_input = {}
@@ -466,6 +485,9 @@ class OpenAICompatibleClient(LLMClient):
         if not self.model:
             raise ValueError("OpenAI-Compatible 模式需要设置 MODEL 环境变量")
 
+    async def close(self) -> None:
+        await self.client.close()
+
     def _to_oai_tool(self, tool: dict) -> dict:
         """将 Anthropic tool 格式转换为 OpenAI function 格式"""
         return {
@@ -476,6 +498,12 @@ class OpenAICompatibleClient(LLMClient):
                 "parameters": tool["input_schema"],
             },
         }
+
+    def _track_completion_usage(self, model: str, usage: "CompletionUsage | None") -> None:
+        if usage is None:
+            logger.warning("模型 %s 未返回 Token 用量，当前调用无法计入费用统计", model)
+            return
+        self._track_usage(model, usage.prompt_tokens, usage.completion_tokens)
 
     def _map_error(self, e: Exception):
         """将 OpenAI SDK 异常归一化为公共异常，未匹配的异常原样抛出"""
@@ -505,6 +533,7 @@ class OpenAICompatibleClient(LLMClient):
             cached = cache.get(system, prompt, tool_name, model)
             if cached is not None:
                 return cached
+        self.check_budget()
         try:
             response = await self.client.chat.completions.create(
                 model=model,
@@ -517,6 +546,7 @@ class OpenAICompatibleClient(LLMClient):
                 tools=[oai_tool],
                 tool_choice={"type": "function", "function": {"name": tool_name}},
             )
+            self._track_completion_usage(model, response.usage)
             arguments = response.choices[0].message.tool_calls[0].function.arguments
             result = json.loads(arguments)
             if cache.enabled and temperature <= 0.5:
@@ -534,6 +564,7 @@ class OpenAICompatibleClient(LLMClient):
         agent_name: str = "",
     ) -> AsyncIterator[str]:
         model = get_routed_model(agent_name, self.model) if agent_name else self.model
+        self.check_budget()
         try:
             response = await self.client.chat.completions.create(
                 model=model,
@@ -549,10 +580,7 @@ class OpenAICompatibleClient(LLMClient):
             async for chunk in response:
                 # 最后一个 chunk 包含 usage 统计
                 if chunk.usage:
-                    self._track_usage(
-                        model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens
-                    )
-                    self.check_budget()
+                    self._track_completion_usage(model, chunk.usage)
                     continue
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
@@ -573,6 +601,7 @@ class OpenAICompatibleClient(LLMClient):
             cached = cache.get("", prompt, "complete", model)
             if cached is not None:
                 return cached.get("text", "")
+        self.check_budget()
         try:
             response = await self.client.chat.completions.create(
                 model=model,
@@ -580,6 +609,7 @@ class OpenAICompatibleClient(LLMClient):
                 temperature=temperature,
                 messages=[{"role": "user", "content": prompt}],
             )
+            self._track_completion_usage(model, response.usage)
             result = response.choices[0].message.content.strip()
             if cache.enabled and temperature <= 0.5:
                 cache.put("", prompt, "complete", model, {"text": result})
@@ -621,6 +651,7 @@ class OpenAICompatibleClient(LLMClient):
         final_result = None
 
         for turn in range(max_turns):
+            self.check_budget()
             try:
                 response = await self.client.chat.completions.create(
                     model=self.model,
@@ -633,6 +664,7 @@ class OpenAICompatibleClient(LLMClient):
             except Exception as e:
                 self._map_error(e)
 
+            self._track_completion_usage(self.model, response.usage)
             msg = response.choices[0].message
             oai_msgs.append(msg.model_dump())
 
@@ -886,6 +918,7 @@ class OllamaClient(OpenAICompatibleClient):
             cached = cache.get(system, prompt, tool_name, model)
             if cached is not None:
                 return cached
+        self.check_budget()
         try:
             response = await self.client.chat.completions.create(
                 model=model,
@@ -898,6 +931,7 @@ class OllamaClient(OpenAICompatibleClient):
                 tools=[oai_tool],
                 tool_choice={"type": "function", "function": {"name": tool_name}},
             )
+            self._track_completion_usage(model, response.usage)
             arguments = response.choices[0].message.tool_calls[0].function.arguments
             result = self._repair_json(arguments)
             if cache.enabled and temperature <= 0.5:
@@ -916,6 +950,7 @@ class OllamaClient(OpenAICompatibleClient):
     ) -> AsyncIterator[str]:
         system, prompt = self._truncate_for_context(system, prompt, max_tokens)
         model = get_routed_model(agent_name, self.model) if agent_name else self.model
+        self.check_budget()
         try:
             response = await self.client.chat.completions.create(
                 model=model,
@@ -955,6 +990,7 @@ class OllamaClient(OpenAICompatibleClient):
             cached = cache.get("", prompt, "complete", model)
             if cached is not None:
                 return cached.get("text", "")
+        self.check_budget()
         try:
             response = await self.client.chat.completions.create(
                 model=model,
@@ -962,6 +998,7 @@ class OllamaClient(OpenAICompatibleClient):
                 temperature=temperature,
                 messages=[{"role": "user", "content": prompt}],
             )
+            self._track_completion_usage(model, response.usage)
             result = response.choices[0].message.content.strip()
             if cache.enabled and temperature <= 0.5:
                 cache.put("", prompt, "complete", model, {"text": result})
@@ -1002,6 +1039,7 @@ class OllamaClient(OpenAICompatibleClient):
         final_result = None
 
         for turn in range(max_turns):
+            self.check_budget()
             try:
                 response = await self.client.chat.completions.create(
                     model=self.model,
@@ -1014,6 +1052,7 @@ class OllamaClient(OpenAICompatibleClient):
             except Exception as e:
                 self._map_error(e)
 
+            self._track_completion_usage(self.model, response.usage)
             msg = response.choices[0].message
             oai_msgs.append(msg.model_dump())
 
@@ -1082,9 +1121,9 @@ def validate_provider_config():
     provider = os.getenv("LLM_PROVIDER", "anthropic").lower()
     if provider == "anthropic":
         key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not key:
+        if not key or key.startswith("your_"):
             raise EnvironmentError(
-                "ANTHROPIC_API_KEY 未设置。请在 .env 文件中配置，或执行: "
+                "ANTHROPIC_API_KEY 未设置或仍为模板占位值。请在 .env 文件中配置，或执行: "
                 "cp resources/.env.example .env && 编辑 .env"
             )
     elif provider in ("openai-compatible", "openai_compatible", "openai"):

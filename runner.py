@@ -93,14 +93,14 @@ class ResumableRunner:
             return None
 
     def _save(self, name: str, data):
-        """原子写入：先写 .tmp 再 rename，防止写到一半时崩溃留下损坏文件"""
+        """原子写入：先写 .tmp，再替换目标文件，兼容 Windows 上的覆盖更新。"""
         p = self._ckpt(name)
         tmp = p.with_suffix(".tmp")
         if hasattr(data, "model_dump_json"):
             tmp.write_text(data.model_dump_json(), encoding="utf-8")
         else:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.rename(p)
+        tmp.replace(p)
 
     def _update_run(self, **kwargs):
         current = self._load("run") or {}

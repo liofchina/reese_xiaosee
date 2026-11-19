@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#102d3a">
+  <title>世界在线 · 山海自有去处</title>
+  <link rel="stylesheet" href="/static/world.css?v=living-1">
+  <script src="/static/world.js?v=living-1" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#world-main">跳至世界地图</a>
+  <svg class="icon-library" aria-hidden="true">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-step" viewBox="0 0 24 24"><path d="m5 5 10 7L5 19ZM19 5v14"/></symbol>
+    <symbol id="i-rain" viewBox="0 0 24 24"><path d="M6 14a5 5 0 1 1 9-5 3 3 0 1 1 2 6M8 17l-1 3M13 17l-1 3M18 17l-1 3"/></symbol>
+    <symbol id="i-market" viewBox="0 0 24 24"><path d="m3 9 2-5h14l2 5M3 9h18M5 10v10h14V10M9 20v-6h6v6"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 2.7 7.3L22 12l-7.3 2.7L12 22l-2.7-7.3L2 12l7.3-2.7Z"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <a class="brand" href="/world" aria-label="世界在线首页"><span class="brand-seal">山海</span><span>世界在线</span></a>
+    <nav aria-label="应用导航"><a href="/">小说创作</a><a href="/docs" target="_blank" rel="noopener">接口文档</a></nav>
+    <div class="world-switcher">
+      <label class="sr-only" for="world-select">切换世界</label>
+      <select id="world-select"><option value="">正在读取世界…</option></select>
+      <button class="button button-outline" id="new-world">开辟新世界</button>
+    </div>
+  </header>
+
+  <main id="world-main" class="page">
+    <section class="world-heading" aria-labelledby="world-title">
+      <div>
+        <h1 id="world-title">山海尚未有名</h1>
+        <p id="world-description">不必成为故事的主角。先看看，这个世界自己会走向哪里。</p>
+      </div>
+      <div class="calendar">
+        <span class="status-pill" id="world-status" data-state="paused">等待开辟</span>
+        <div><strong id="world-day">尚无历日</strong><span id="world-weather">山川待启</span></div>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button aria-label="关闭提示" id="dismiss-notice">×</button></div>
+    <div id="world-error" class="notice" role="alert" hidden></div>
+
+    <section class="time-controls" aria-label="世界时间控制">
+      <div class="time-buttons">
+        <button id="run-world" class="button button-primary" disabled><svg class="icon" aria-hidden="true"><use id="run-icon" href="#i-play"/></svg><span id="run-label">开始演化</span></button>
+        <button id="step-world" class="button button-outline" disabled><svg class="icon" aria-hidden="true"><use href="#i-step"/></svg>推进一日</button>
+        <label class="speed-label" for="world-speed">流速</label>
+        <select id="world-speed" disabled>
+          <option value="3">每 3 秒一日</option><option value="5">每 5 秒一日</option>
+          <option value="15" selected>每 15 秒一日</option><option value="30">每 30 秒一日</option><option value="60">每 60 秒一日</option>
+        </select>
+      </div>
+      <p id="sync-status" aria-live="polite">进度保存在当前服务器</p>
+    </section>
+
+    <section id="living-status" class="living-status" aria-label="世界此刻" hidden>
+      <p id="world-condition"></p>
+      <div><span id="river-status"></span><span id="ledger-status"></span></div>
+    </section>
+
+    <div class="world-layout">
+      <div class="landscape-column">
+        <section class="atlas" aria-label="可交互的世界地图">
+          <div class="atlas-heading"><h2 id="atlas-title">山海舆图</h2><span id="map-caption">点选一处山川，看看谁在那里。</span></div>
+          <div class="atlas-frame" id="atlas-frame">
+            <svg class="landscape" viewBox="0 0 1000 650" preserveAspectRatio="none" aria-hidden="true">
+              <defs><pattern id="water-lines" width="70" height="46" patternUnits="userSpaceOnUse"><path d="M8 22q12-8 24 0t24 0" fill="none" stroke="#264955" stroke-width="1"/></pattern></defs>
+              <rect width="1000" height="650" fill="url(#water-lines)"/>
+              <path class="coast-outer" d="M128 118 188 77 310 87 372 55 481 74 549 56 618 101 739 104 814 156 864 245 829 301 861 373 808 427 779 501 684 549 599 529 522 574 418 553 333 593 224 559 164 512 116 432 151 360 112 281 143 205Z"/>
+              <path class="coast" d="M143 131 199 92 313 103 374 71 480 91 545 73 615 117 734 122 799 167 846 246 811 301 843 373 792 419 764 489 682 531 598 512 521 557 418 537 332 576 233 544 180 500 134 432 168 360 129 281 161 207Z"/>
+              <path class="terrain-patch" d="m190 109 116 17 74-31 70 48-21 118-81 29-112-30-68-65Z"/>
+              <path class="terrain-patch terrain-east" d="m631 153 104-17 73 91-25 112-105 36-79-60-16-96Z"/>
+              <path class="terrain-patch terrain-valley" d="m195 379 136-35 90 83-47 104-132-7-74-79Z"/>
+              <g class="contours">
+                <path d="m192 146 79-19 76 31 51-38 48 48M181 171l88-19 74 36 52-42 44 43M175 198l91-18 77 37 53-37 34 31"/>
+                <path d="m651 190 57-22 60 41 25 61-28 43M642 215l61-21 47 28 25 50-25 35M636 241l61-22 36 22 17 33-15 24"/>
+                <path d="m202 421 55-32 58 16 42 46-17 47M197 444l58-30 47 14 33 31-15 37M214 461l39-22 35 10 21 20-10 23"/>
+              </g>
+              <path class="river" d="M432 164q-58 58-38 113t35 68q49 20 85 12t63 44q30 36 72 56"/>
+              <path class="river river-small" d="M607 218q-32 41-24 74t-61 65"/>
+              <ellipse class="lake" cx="407" cy="333" rx="43" ry="25" transform="rotate(-20 407 333)"/>
+              <g id="map-roads" class="map-roads"></g>
+              <g class="map-lettering"><text x="858" y="506" transform="rotate(-8 858 506)">雾</text><text x="891" y="557" transform="rotate(-8 891 557)">海</text></g>
+              <g class="compass" transform="translate(916 80)"><path d="m0-31 8 24 23 7-23 8-8 23-8-23-23-8 23-7Z"/><path d="M0-31v62M-31 0h62"/><text x="0" y="-44" text-anchor="middle">北</text></g>
+            </svg>
+            <div id="map-nodes"></div>
+            <div id="map-travelers"></div>
+            <div class="map-empty" id="map-empty"><span class="empty-seal">启</span><h3>给这片山海一个开始</h3><p>田庄、矿区与聚落，三十个人的生计。<br>从一座断桥开始，看世界如何改变。</p><button class="button button-primary" id="create-first-world">开辟世界</button></div>
+            <div class="map-scale" aria-hidden="true"><span></span><span id="map-scale-copy">山路相连，人物沿路而行</span></div>
+          </div>
+          <div class="factions" id="factions" aria-label="世界势力"></div>
+        </section>
+
+        <section id="infrastructure-section" class="infrastructure-section" aria-labelledby="infrastructure-title" hidden>
+          <div class="section-heading"><h2 id="infrastructure-title">道路与工程</h2><span>实线可通行，红线中断，金线为临时浅滩</span></div>
+          <div id="bridge-detail" class="bridge-detail"></div>
+          <details class="road-directory"><summary>查看各段道路与耗时</summary><ul id="road-list"></ul></details>
+        </section>
+
+        <section class="interventions" aria-labelledby="intervention-title">
+          <div class="section-heading"><h2 id="intervention-title">轻拨天机</h2><span id="intervention-location">选择地图上的地点</span></div>
+          <div class="intervention-actions" id="classic-interventions">
+            <button data-intervention="rain" disabled><svg class="icon" aria-hidden="true"><use href="#i-rain"/></svg><span><strong>降下灵雨</strong><small>此地灵气最多 +20</small></span></button>
+            <button data-intervention="market" disabled><svg class="icon" aria-hidden="true"><use href="#i-market"/></svg><span><strong>开设集市</strong><small>此地繁荣最多 +15</small></span></button>
+            <button data-intervention="enlightenment" disabled><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg><span><strong>赐予感悟</strong><small>所有人物修行 +8</small></span></button>
+          </div>
+          <div class="intervention-actions living-interventions" id="living-interventions" hidden>
+            <button data-intervention="flood" disabled><svg class="icon" aria-hidden="true"><use href="#i-rain"/></svg><span><strong>施加洪水扰动</strong><small>冲击石桥，观察改道与应对</small></span></button>
+            <button data-intervention="repair_contract" disabled><svg class="icon" aria-hidden="true"><use href="#i-market"/></svg><span><strong>追加修桥委托</strong><small>从真实公库划拨 40 枚钱</small></span></button>
+          </div>
+          <p id="experiment-note" class="section-note" hidden>这是明确标记的观察实验，不伪装成自然事件。请选择汀川城或折潮渡；人物仍自行决定如何应对。</p>
+        </section>
+
+        <section class="event-section" aria-labelledby="events-title">
+          <div class="section-heading"><h2 id="events-title">山海见闻</h2><div class="section-actions"><button class="text-button" id="open-history" hidden>查阅历史</button><button class="text-button" id="filter-events" aria-pressed="false" disabled>只看此地</button></div></div>
+          <p class="section-note">最近的事实在前。带有“追溯原因”的记录可以继续查到更早的事实。</p>
+          <ol id="event-list" class="event-list"><li class="empty-copy">世界开辟后，第一条见闻会留在这里。</li></ol>
+        </section>
+      </div>
+
+      <aside class="details-column" aria-label="地点、人物与 AI">
+        <section class="place-section" aria-labelledby="place-title">
+          <div class="section-heading"><h2 id="place-title">山川待访</h2><span id="place-terrain" class="muted">未选地点</span></div>
+          <p id="place-description" class="place-description">地图上的每一处地点，都有不同的灵气、繁荣与山路险度。</p>
+          <p id="place-owner" class="owner-label"></p>
+          <div class="meters" id="place-meters">
+            <label for="spirit-meter">灵气<progress id="spirit-meter" max="100" value="0"></progress><span id="spirit-value">—</span></label>
+            <label for="prosperity-meter">繁荣<progress id="prosperity-meter" max="100" value="0"></progress><span id="prosperity-value">—</span></label>
+            <label for="danger-meter">险度<progress id="danger-meter" max="100" value="0"></progress><span id="danger-value">—</span></label>
+          </div>
+          <div id="market-section" class="market-section" hidden>
+            <table class="market-table"><caption>当地货栈与采区</caption><thead><tr><th scope="col">物资</th><th scope="col">货栈</th><th scope="col">售价</th><th scope="col">可采</th></tr></thead><tbody id="market-stock"></tbody></table>
+            <p id="market-cash" class="section-note"></p>
+            <p class="section-note">售价为每份所需钱数，收购价比售价低 1、最低 1。货栈无钱或满仓时会停止收购。</p>
+          </div>
+        </section>
+
+        <section class="people-section" aria-labelledby="people-title">
+          <div class="section-heading"><h2 id="people-title">此地人物</h2><button class="text-button" id="show-all-people" aria-pressed="false" disabled>查看所有人</button></div>
+          <div id="people-list" class="people-list"><p class="empty-copy">他们将在这里落脚，也会继续远行。</p></div>
+          <div id="person-detail" class="person-detail" hidden>
+            <div class="person-heading"><h3 id="person-name"></h3><span id="person-realm"></span></div>
+            <p id="person-goal"></p><p id="person-action" class="muted"></p>
+            <div class="person-stats"><span id="person-energy"></span><span id="person-cultivation"></span><button class="text-button" id="locate-person">在地图上定位</button></div>
+            <div id="person-life" class="person-life" hidden>
+              <p id="person-body"></p><p id="person-inventory"></p><p id="person-journey"></p>
+              <div class="person-plan"><h4>当前打算</h4><p id="person-plan"></p><button id="person-history" class="text-button">查阅行动档案</button></div>
+              <details class="knowledge-details"><summary>他所知道的路况与市价</summary><div id="person-knowledge"></div></details>
+              <div class="memory-heading"><h4>近期记忆</h4><span>记忆不等于全世界的真相</span></div>
+              <ul id="person-memories" class="person-memories"></ul>
+              <p id="person-relationships" class="section-note"></p>
+            </div>
+          </div>
+        </section>
+
+        <section class="ai-section" aria-labelledby="ai-title">
+          <div class="section-heading"><h2 id="ai-title">世界的声音</h2><span class="ai-tag">按需 AI</span></div>
+          <p id="ai-status" class="section-note">正在检查模型配置。自动演化不消耗模型调用。</p>
+          <div class="ai-chronicle">
+            <button class="button button-outline" id="generate-chronicle" disabled>为这一日写则纪事</button>
+            <p id="chronicle-meta" class="ai-meta"></p>
+            <p id="chronicle-text" class="narrative">点击后，AI 会根据已发生的见闻写作，不改变世界状态。</p>
+          </div>
+          <form id="chat-form" class="chat-form">
+            <label for="npc-question" id="chat-label">与人物对话</label>
+            <textarea id="npc-question" rows="2" maxlength="500" required placeholder="你今日在此地有什么见闻？" disabled></textarea>
+            <button class="button button-outline" id="ask-npc" type="submit" disabled>问一问这位人物</button>
+          </form>
+          <p id="dialogue-meta" class="ai-meta"></p><p id="dialogue-question" class="dialogue-question"></p>
+          <p id="dialogue-text" class="narrative"></p>
+          <p class="ai-footnote">只在点击时调用模型。回复基于请求时的世界快照，不会代替人物做决定。</p>
+        </section>
+      </aside>
+    </div>
+
+    <footer class="world-footer"><p id="world-save-info">世界由规则推进。AI 只负责你主动请求的纪事与对话。</p><button id="delete-world" class="text-button danger-text" disabled>删除这个世界</button></footer>
+    <div class="sr-only" id="action-announcement" role="status" aria-live="polite"></div>
+  </main>
+
+  <dialog id="create-dialog">
+    <form id="create-form">
+      <div class="dialog-heading"><h2>开辟一方山海</h2><button type="button" class="close-button" id="close-create" aria-label="关闭创建窗口">×</button></div>
+      <p class="dialog-copy" id="ruleset-description">田庄、货栈、工地与旧观测所。人物要吃饭、运输、谋生，也会研究可以改变水路的力量。</p>
+      <label for="new-world-ruleset">世界规则</label><select id="new-world-ruleset"><option value="living" selected>因果世界：汀川初生</option><option value="classic">经典仙侠沙盘：保留原规则</option></select>
+      <label for="new-world-name">世界名称</label><input id="new-world-name" name="name" value="汀川·初生" maxlength="40" required autocomplete="off">
+      <label for="new-world-seed">世界种子 <span class="muted">可留空</span></label><input id="new-world-seed" name="seed" type="number" min="0" max="2147483647" step="1" placeholder="相同种子可重现相同规则演化">
+      <p class="dialog-copy">新世界从暂停状态开始，不改动已有世界。规则演化无需 API Key，事实与状态一同保存。</p>
+      <p id="create-error" class="form-error" role="alert" hidden></p>
+      <button class="button button-primary" type="submit" id="submit-create">开辟世界</button>
+    </form>
+  </dialog>
+
+  <dialog id="history-dialog" class="history-dialog">
+    <div class="dialog-heading"><h2 id="history-title">世界史</h2><button type="button" class="close-button" id="close-history" aria-label="关闭历史">×</button></div>
+    <p id="history-description" class="dialog-copy"></p>
+    <p id="history-error" class="form-error" role="alert" hidden></p>
+    <ol id="history-list" class="event-list"></ol>
+    <button id="history-more" class="button button-outline" hidden>读取更早的事实</button>
+  </dialog>
+
+  <dialog id="fact-dialog" class="fact-dialog">
+    <div class="dialog-heading"><h2 id="fact-title">事实记录</h2><button type="button" class="close-button" id="close-fact" aria-label="关闭事实记录">×</button></div>
+    <p id="fact-error" class="form-error" role="alert" hidden></p>
+    <p id="fact-meta" class="ai-meta"></p><p id="fact-detail" class="narrative"></p>
+    <ul id="fact-effects" class="fact-effects"></ul><div id="fact-causes" class="fact-causes"></div>
+  </dialog>
+
+  <dialog id="experiment-dialog">
+    <div class="dialog-heading"><h2 id="experiment-title">施加观察扰动</h2><button type="button" class="close-button" id="close-experiment" aria-label="取消观察实验">×</button></div>
+    <p id="experiment-description" class="dialog-copy"></p>
+    <div class="dialog-actions"><button id="cancel-experiment" class="button button-outline">保留现状</button><button id="confirm-experiment" class="button button-primary">确认实验</button></div>
+  </dialog>
+
+  <dialog id="delete-dialog">
+    <div class="dialog-heading"><h2>让这段山海落幕？</h2><button type="button" class="close-button" id="close-delete" aria-label="关闭删除窗口">×</button></div>
+    <p class="dialog-copy" id="delete-description"></p>
+    <p class="dialog-copy">会删除这个世界的存档与见闻，无法恢复。其他世界和小说不受影响。</p>
+    <div class="dialog-actions"><button class="button button-outline" id="cancel-delete">保留世界</button><button class="button button-danger" id="confirm-delete">确认删除</button></div>
+  </dialog>
+</body>
+</html>

@@ -3,9 +3,11 @@ import json
 import logging
 import os
 import re
+import shutil
+import sqlite3
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
@@ -21,6 +23,8 @@ from core.db import init_db, save_novel, list_novels, delete_novel, get_novel
 from core.observability import Tracer
 from core.guardrails import sanitize_input, scan_output, get_guardrail_level
 from core.llm_client import validate_provider_config
+from core.world_api import router as world_router
+from core.world_runtime import WorldRuntime
 
 load_dotenv()
 
@@ -81,14 +85,26 @@ async def _cleanup_stale_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    validate_provider_config()
+    try:
+        validate_provider_config()
+    except EnvironmentError as exc:
+        logger.warning("模型尚未配置，规则世界仍可使用：%s", exc)
     init_db()
+    world_runtime = WorldRuntime()
+    await world_runtime.start()
+    app.state.world_runtime = world_runtime
     cleanup_task = asyncio.create_task(_cleanup_stale_tasks())
-    yield
-    cleanup_task.cancel()
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+        await world_runtime.close()
 
 
 app = FastAPI(title="AI 网文生成器", lifespan=lifespan)
+app.include_router(world_router)
 
 # ── CORS（建议6）─────────────────────────────────────────────────────────────
 
@@ -118,7 +134,9 @@ RATE_LIMIT_MAX_IPS = 10000  # 最大跟踪 IP 数，防止内存泄漏
 
 @app.middleware("http")
 async def rate_limit_generate(request: Request, call_next):
-    if request.url.path == "/api/generate" and request.method == "POST":
+    path = request.url.path
+    world_ai = path.startswith("/api/worlds/") and path.rsplit("/", 1)[-1] in {"chronicle", "chat"}
+    if request.method == "POST" and (path == "/api/generate" or world_ai):
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
         hits = _rate_limit_store.get(client_ip, [])
@@ -143,10 +161,19 @@ async def index():
     return FileResponse("resources/static/index.html")
 
 
+@app.get("/world")
+async def world_page():
+    return FileResponse("resources/static/world.html")
+
+
 # ── 启动生成（POST）────────────────────────────────────────────────────────────
 
 @app.post("/api/generate")
 async def start_generate(request: WebNovelRequest):
+    try:
+        validate_provider_config()
+    except EnvironmentError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     # ── 前置输入消毒（建议2）────────────────────────────────
     if get_guardrail_level() != "none":
         text_fields = [
@@ -270,39 +297,40 @@ async def stream_events(task_id: str):
                     novel_obj = data
 
                 elif event_type == "novel_complete":
-                    # 保存 Markdown（全书 + 分文件）
-                    if novel_obj:
-                        out_dir = OUTPUT_DIR / task_id
-                        out_dir.mkdir(parents=True, exist_ok=True)
-                        # 全书
-                        out_path = out_dir / "novel.md"
-                        out_path.write_text(novel_obj.to_markdown(), encoding="utf-8")
-                        # 分文件导出
-                        (out_dir / "worldbuilding.md").write_text(
-                            novel_obj.to_worldbuilding_markdown(), encoding="utf-8"
-                        )
-                        (out_dir / "characters.md").write_text(
-                            novel_obj.to_characters_markdown(), encoding="utf-8"
-                        )
-                        (out_dir / "scenes.md").write_text(
-                            novel_obj.to_scenes_markdown(), encoding="utf-8"
-                        )
-                        save_novel(
-                            task_id=task_id,
-                            title=novel_obj.title,
-                            genre=req.genre,
-                            core_pleasure=req.core_pleasure,
-                            quality_mode=req.quality_mode,
-                            num_volumes=len(novel_obj.outline.volumes),
-                            total_chapters=len(novel_obj.chapters),
-                            markdown_path=str(out_dir),
-                        )
-                        payload = {
-                            "title": data.get("title", novel_obj.title),
-                            "download_url": f"/api/download/{task_id}",
-                        }
-                    else:
-                        payload = {"title": data.get("title", ""), "download_url": ""}
+                    if novel_obj is None:
+                        logger.error("任务 %s 已完成，但缺少小说结果", task_id)
+                        message = {"message": "生成结果缺失，无法保存，请重试"}
+                        yield f"event: error\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
+                        break
+
+                    out_dir = OUTPUT_DIR / task_id
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    (out_dir / "novel.md").write_text(
+                        novel_obj.to_markdown(), encoding="utf-8"
+                    )
+                    (out_dir / "worldbuilding.md").write_text(
+                        novel_obj.to_worldbuilding_markdown(), encoding="utf-8"
+                    )
+                    (out_dir / "characters.md").write_text(
+                        novel_obj.to_characters_markdown(), encoding="utf-8"
+                    )
+                    (out_dir / "scenes.md").write_text(
+                        novel_obj.to_scenes_markdown(), encoding="utf-8"
+                    )
+                    save_novel(
+                        task_id=task_id,
+                        title=novel_obj.title,
+                        genre=req.genre,
+                        core_pleasure=req.core_pleasure,
+                        quality_mode=req.quality_mode,
+                        num_volumes=len(novel_obj.outline.volumes),
+                        total_chapters=len(novel_obj.chapters),
+                        markdown_path=str(out_dir),
+                    )
+                    payload = {
+                        "title": data.get("title", novel_obj.title),
+                        "download_url": f"/api/download/{task_id}",
+                    }
 
                     yield f"event: novel_complete\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     break
@@ -317,6 +345,10 @@ async def stream_events(task_id: str):
 
         except asyncio.TimeoutError:
             yield f"event: error\ndata: {json.dumps({'message': '生成超时，请重试'}, ensure_ascii=False)}\n\n"
+        except (OSError, sqlite3.Error):
+            logger.exception("保存任务 %s 的生成结果失败", task_id)
+            message = {"message": "生成结果保存失败，请检查存储后重试"}
+            yield f"event: error\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
         finally:
             _tasks.pop(task_id, None)
 
@@ -354,9 +386,17 @@ async def remove_history(task_id: str):
         raise HTTPException(status_code=404, detail="记录不存在")
     if record.get("markdown_path"):
         p = Path(record["markdown_path"]).resolve()
-        # 安全校验：确保路径在 OUTPUT_DIR 内，防止任意文件删除
-        if str(p).startswith(str(OUTPUT_DIR.resolve())) and p.exists():
-            p.unlink()
+        output_root = OUTPUT_DIR.resolve()
+        if p == output_root or not p.is_relative_to(output_root):
+            raise HTTPException(status_code=400, detail="生成文件路径不在有效输出目录内")
+        try:
+            if p.is_dir():
+                shutil.rmtree(p)
+            elif p.exists():
+                p.unlink()
+        except OSError as exc:
+            logger.exception("删除任务 %s 的生成文件失败", task_id)
+            raise HTTPException(status_code=500, detail="生成文件删除失败，请稍后重试") from exc
     deleted = delete_novel(task_id)
     return {"deleted": deleted}
 

@@ -170,6 +170,7 @@ body{background:var(--bg);color:var(--text);font-family:'PingFang SC','Microsoft
 
 <div id="topbar">
   <h1>⚡ 网文 AI 引擎</h1>
+  <a href="/world" style="color:var(--green);font-size:13px;white-space:nowrap;text-decoration:none;">进入世界在线</a>
   <div id="progress-wrap">
     <div id="progress-bar-bg"><div id="progress-bar"></div></div>
     <span id="status-text">准备就绪</span>
@@ -414,6 +415,7 @@ async function startGenerate(){
   try{
     const res=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const data=await res.json();
+    if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:'启动生成失败，请检查配置');
     taskId=data.task_id;
   }catch(e){alert('启动失败：'+e.message);return;}
 
